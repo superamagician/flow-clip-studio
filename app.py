@@ -375,10 +375,15 @@ def autofill(brief: dict, uid: int | None = None) -> dict:
     # user's own earlier preview of the same not-yet-generated product) so the copy
     # the customer approved in preview is exactly what ends up in the actual
     # generation - without this, calling the AI again at generate time would very
-    # likely produce different text than what was just shown.
+    # likely produce different text than what was just shown. Only trust a cached
+    # brief for this if it was itself produced by the AI (_ai_copy_used) - a brief
+    # saved before this feature existed (or from a static-fallback run) has the old
+    # generic filler baked into every field, which would otherwise look identical
+    # to "already resolved" and permanently block the AI from ever running again
+    # for that product_id.
     if uid and any(not brief.get(f) for f in AI_FILL_FIELDS):
         cached = db.get_brief(uid, brief["product_id"])
-        if cached:
+        if cached and cached.get("_ai_copy_used"):
             for field in AI_FILL_FIELDS:
                 if not brief.get(field) and cached.get(field):
                     brief[field] = cached[field]
@@ -386,6 +391,8 @@ def autofill(brief: dict, uid: int | None = None) -> dict:
     needs_ai_copy = any(not brief.get(f) for f in AI_FILL_FIELDS)
     ai_copy = ai_copywriter.generate_copy(name, brief.get("product_visual_desc", "")) \
         if needs_ai_copy and ai_copywriter.enabled() else None
+    if ai_copy:
+        brief["_ai_copy_used"] = True
 
     if not brief.get("presenter_desc"):
         scene = ai_copy["scene_setting_desc"] if ai_copy else "a bright clean modern room"
