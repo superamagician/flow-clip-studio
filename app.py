@@ -596,9 +596,33 @@ def api_downloads():
         path = outputs_dir / clip["file"]
         size = path.stat().st_size if path.exists() else 0
         total_bytes += size
-        result.append({**clip_view(clip, outputs_dir), "size_bytes": size})
+        # Older clips (generated before product_link was required) may have no
+        # product_id at all - fall back to the same slugified-category key used
+        # elsewhere so a link can still be attached retroactively before export.
+        effective_product_id = clip.get("product_id") or slugify(clip.get("category") or "")
+        brief = db.get_brief(uid, effective_product_id) if effective_product_id else None
+        result.append({**clip_view(clip, outputs_dir), "size_bytes": size,
+                        "effective_product_id": effective_product_id,
+                        "product_link": (brief or {}).get("product_link", "")})
     return jsonify({"clips": result, "total_bytes": total_bytes,
                      "retention_days": CLIP_RETENTION_DAYS})
+
+
+@app.route("/api/downloads/product_link", methods=["POST"])
+@login_required
+def api_set_product_link():
+    """Attach/update a product_link retroactively for a product whose clips were
+    generated before the link field existed or was left blank - lets Shopee Pack
+    and caption auto-attach work for old clips too, without regenerating them."""
+    uid = current_user_id()
+    payload = request.get_json(force=True) or {}
+    product_id = (payload.get("product_id") or "").strip()
+    product_link = (payload.get("product_link") or "").strip()
+    category = (payload.get("category") or "").strip()
+    if not product_id or not product_link:
+        return jsonify({"error": "ข้อมูลไม่ครบ"}), 400
+    db.set_brief_field(uid, product_id, "product_link", product_link, category)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/downloads/<int:clip_id>", methods=["DELETE"])
@@ -672,9 +696,10 @@ def api_downloads_zip():
 @login_required
 def api_downloads_shopee_pack():
     """Pair each selected clip with a same-name .json (title/product_link/caption/
-    video_filename) in one zip, ready for a Shopee bulk-video-upload tool. Needs the
-    clip's product_id (only present on clips generated after this feature shipped -
-    older ones fall back to category/no caption/no link)."""
+    video_filename) in one zip, ready for a Shopee bulk-video-upload tool. Looks up
+    the saved brief by product_id, falling back to slugify(category) for clips that
+    predate the product_id column - which is also the key used by
+    /api/downloads/product_link, so a retroactively-added link is found here too."""
     uid = current_user_id()
     outputs_dir = user_dir(uid) / "outputs"
     clip_ids = (request.get_json(force=True) or {}).get("clip_ids") or []
@@ -698,7 +723,8 @@ def api_downloads_shopee_pack():
             used_names.add(name)
             zf.writestr(name, data)
 
-            brief = db.get_brief(uid, clip["product_id"]) if clip.get("product_id") else None
+            effective_product_id = clip.get("product_id") or slugify(clip.get("category") or "")
+            brief = db.get_brief(uid, effective_product_id) if effective_product_id else None
             title = (brief.get("product_name") if brief else "") or clip.get("category") or ""
             product_link = (brief.get("product_link") if brief else "") or ""
             caption_text = ""

@@ -73,6 +73,9 @@
         <td>${c.width || "?"}×${c.height || "?"} · ${c.duration || "?"}s</td>
         <td>${fmtBytes(c.size_bytes)}${!c.exists ? '<div class="missing">ไม่พบไฟล์จริง (เซิร์ฟเวอร์รีสตาร์ท)</div>' : ""}</td>
         <td>${(c.created_at || "").slice(0, 16)}</td>
+        <td class="linkCell" data-product-id="${c.effective_product_id || ""}" data-category="${(c.category || "").replace(/"/g, '&quot;')}">
+          ${renderLinkCell(c)}
+        </td>
         <td class="actions">
           ${c.exists ? `<a class="btn btn-accent" href="${c.url}" download>ดาวน์โหลด</a>` : ""}
           <button class="btn btn-danger" onclick="deleteClip(${c.id})">ลบ</button>
@@ -82,7 +85,7 @@
     wrap.innerHTML = `<table>
       <thead><tr>
         <th><input type="checkbox" id="selectAllCheck"></th>
-        <th></th><th>สินค้า/segment</th><th>สเปก</th><th>ขนาดไฟล์</th><th>วันที่สร้าง</th><th>จัดการ</th>
+        <th></th><th>สินค้า/segment</th><th>สเปก</th><th>ขนาดไฟล์</th><th>วันที่สร้าง</th><th>ลิงก์สินค้า</th><th>จัดการ</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
@@ -91,7 +94,54 @@
       updateSelectedCount();
     });
     document.querySelectorAll(".clipCheck").forEach(cb => cb.addEventListener("change", updateSelectedCount));
+    document.querySelectorAll(".editLinkBtn").forEach(btn => btn.addEventListener("click", (e) => {
+      const cell = e.target.closest(".linkCell");
+      showLinkEditor(cell);
+    }));
     updateSelectedCount();
+  }
+
+  function renderLinkCell(c) {
+    if (c.product_link) {
+      return `<a href="${c.product_link}" target="_blank" rel="noopener" style="font-size:12px">🔗 เปิดลิงก์</a>
+        <button type="button" class="btn editLinkBtn" style="padding:2px 8px;margin-left:4px">แก้ไข</button>`;
+    }
+    if (!c.effective_product_id) {
+      return '<span style="color:var(--muted);font-size:11px">ไม่ทราบสินค้า</span>';
+    }
+    return `<span class="missing">ยังไม่มีลิงก์</span>
+      <button type="button" class="btn editLinkBtn" style="padding:2px 8px;margin-left:4px">+ เพิ่มลิงก์</button>`;
+  }
+
+  function showLinkEditor(cell) {
+    const productId = cell.dataset.productId;
+    const category = cell.dataset.category;
+    cell.innerHTML = `
+      <input type="text" class="linkInput" placeholder="https://shopee.co.th/..." style="width:160px;font-size:12px;padding:4px 6px">
+      <button type="button" class="btn btn-accent saveLinkBtn" style="padding:2px 8px">บันทึก</button>
+    `;
+    const input = cell.querySelector(".linkInput");
+    input.focus();
+    cell.querySelector(".saveLinkBtn").addEventListener("click", async () => {
+      const link = input.value.trim();
+      if (!link) { alert("ใส่ลิงก์ก่อน"); return; }
+      try {
+        const res = await fetch("/api/downloads/product_link", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_id: productId, product_link: link, category }),
+        });
+        const data = await res.json();
+        if (data.error) { alert("บันทึกไม่สำเร็จ: " + data.error); return; }
+      } catch (e) {
+        alert("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง");
+        return;
+      }
+      // Every clip sharing this product_id should reflect the new link too.
+      document.querySelectorAll(`.linkCell[data-product-id="${CSS.escape(productId)}"]`).forEach(c => {
+        c.innerHTML = renderLinkCell({ product_link: link, effective_product_id: productId });
+        c.querySelectorAll(".editLinkBtn").forEach(btn => btn.addEventListener("click", (e) => showLinkEditor(e.target.closest(".linkCell"))));
+      });
+    });
   }
 
   function updateSelectedCount() {

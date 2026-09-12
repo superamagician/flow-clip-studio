@@ -475,3 +475,12 @@ def get_brief(user_id: int, product_id: str) -> dict | None:
             (user_id, product_id))
         row = cur.fetchone()
         return json.loads(row["brief_json"]) if row else None
+
+
+def set_brief_field(user_id: int, product_id: str, field: str, value, category: str = "") -> None:
+    """Update one field on a saved brief without clobbering the rest - or create a
+    minimal brief if this product predates the briefs table (old clips generated
+    before product_link existed), so a link can still be attached retroactively."""
+    existing = get_brief(user_id, product_id) or {"product_id": product_id}
+    existing[field] = value
+    save_brief(user_id, product_id, category or existing.get("product_name") or product_id, existing)
