@@ -728,6 +728,23 @@ def api_captions():
     return jsonify(result)
 
 
+@app.route("/api/briefs")
+@login_required
+def api_briefs():
+    """Products this user has generated before, newest first - lets captions
+    (or a re-generate) be created later without retyping the whole brief."""
+    return jsonify(db.list_briefs(current_user_id()))
+
+
+@app.route("/api/briefs/<path:product_id>")
+@login_required
+def api_brief(product_id: str):
+    brief = db.get_brief(current_user_id(), product_id)
+    if not brief:
+        return jsonify({"error": "ไม่พบข้อมูลสินค้านี้"}), 404
+    return jsonify(brief)
+
+
 @app.route("/api/characters")
 @login_required
 def api_characters():
@@ -791,6 +808,7 @@ def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[
         "opacity": brief.get("watermark_opacity") or 0.6,
     }
     account_email = brief.get("account_email") or db.get_credential(uid, "GOOGLE_FLOW_EMAIL")
+    db.save_brief(uid, brief.get("product_id") or category, category, brief)
 
     rows = bbf.build_rows(brief)
     client = get_client(uid)

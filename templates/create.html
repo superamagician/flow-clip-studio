@@ -170,6 +170,10 @@
 
   <fieldset style="margin-top:24px">
     <legend>📝 แคปชั่น + แฮชแท็ก (ใช้ข้อมูลจากฟอร์มด้านบน)</legend>
+    <label>สร้างย้อนหลังจากสินค้าที่เคยสร้างไว้ (ไม่บังคับ — เลือกแล้วฟอร์มด้านบนจะเติมข้อมูลให้อัตโนมัติ)</label>
+    <select id="pastProductSelect">
+      <option value="">-- เลือกสินค้าเก่า หรือกรอกฟอร์มด้านบนเอง --</option>
+    </select>
     <div class="row3">
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);margin:0">
         <input type="checkbox" class="platformCheck" value="tiktok" checked> TikTok</label>
@@ -283,6 +287,41 @@ document.getElementById("logoFile").addEventListener("change", async (e) => {
     }
   } catch (e) { /* silent - default account is used if this fails */ }
 })();
+
+(async function loadPastProducts() {
+  try {
+    const res = await fetch("/api/briefs");
+    const briefs = await res.json();
+    const select = document.getElementById("pastProductSelect");
+    briefs.forEach(b => {
+      const opt = document.createElement("option");
+      opt.value = b.product_id;
+      opt.textContent = `${b.category || b.product_id} (${(b.updated_at || "").slice(0, 16)})`;
+      select.appendChild(opt);
+    });
+  } catch (e) { /* silent - manual entry still works */ }
+})();
+
+document.getElementById("pastProductSelect").addEventListener("change", async (e) => {
+  const productId = e.target.value;
+  if (!productId) return;
+  try {
+    const res = await fetch("/api/briefs/" + encodeURIComponent(productId));
+    const brief = await res.json();
+    if (brief.error) { alert(brief.error); return; }
+
+    const form = document.getElementById("briefForm");
+    for (const [key, value] of Object.entries(brief)) {
+      const el = form.elements[key];
+      if (el && typeof value === "string") el.value = value;
+    }
+    const genreValues = (brief.genres || brief.genre || "").split(",").map(g => g.trim()).filter(Boolean);
+    if (genreValues.length) {
+      document.querySelectorAll(".genreCheck").forEach(cb => { cb.checked = genreValues.includes(cb.value); });
+      updateGenreNote();
+    }
+  } catch (e) { alert("โหลดข้อมูลสินค้าเก่าไม่สำเร็จ"); }
+});
 
 function collectBrief() {
   const form = document.getElementById("briefForm");

@@ -134,6 +134,19 @@ def init_db() -> None:
             updated_at TEXT NOT NULL
         );
 
+        -- Full brief (hook lines, feature tags, CTA, etc.) saved every time a
+        -- product is generated, keyed by product_id - lets captions (or a
+        -- re-generate) be created later for a past product without retyping
+        -- everything from scratch.
+        CREATE TABLE IF NOT EXISTS briefs (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            product_id TEXT NOT NULL,
+            category TEXT,
+            brief_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, product_id)
+        );
+
         -- clips/activity_log have no user_id-leading key (clips/activity_log PK is
         -- just id; characters' PK leads with id not user_id) so every per-user
         -- listing query does a full table scan without these.
@@ -421,3 +434,36 @@ def get_flow_credits(user_id: int) -> int | None:
         cur.execute("SELECT credits FROM flow_credits WHERE user_id = %s", (user_id,))
         row = cur.fetchone()
         return row["credits"] if row else None
+
+
+# ---------------------------------------------------------------------------
+# Saved briefs (for regenerating captions/clips for a past product later)
+# ---------------------------------------------------------------------------
+
+def save_brief(user_id: int, product_id: str, category: str, brief: dict) -> None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO briefs (user_id, product_id, category, brief_json, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (user_id, product_id) DO UPDATE SET category = EXCLUDED.category, "
+            "brief_json = EXCLUDED.brief_json, updated_at = EXCLUDED.updated_at",
+            (user_id, product_id, category, json.dumps(brief, ensure_ascii=False),
+             time.strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+
+
+def list_briefs(user_id: int) -> list[dict]:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT product_id, category, updated_at FROM briefs "
+            "WHERE user_id = %s ORDER BY updated_at DESC", (user_id,))
+        return [dict(r) for r in cur.fetchall()]
+
+
+def get_brief(user_id: int, product_id: str) -> dict | None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT brief_json FROM briefs WHERE user_id = %s AND product_id = %s",
+            (user_id, product_id))
+        row = cur.fetchone()
+        return json.loads(row["brief_json"]) if row else None
