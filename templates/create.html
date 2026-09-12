@@ -354,12 +354,27 @@ document.getElementById("createBtn").addEventListener("click", async () => {
   if (!refPath) { alert("อัปโหลดรูปสินค้าก่อน"); return; }
   if (!document.querySelectorAll(".genreCheck:checked").length) { alert("เลือกแนวคลิปอย่างน้อย 1 แนว"); return; }
 
+  const btn = document.getElementById("createBtn");
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "⏳ กำลังแต่งคำโฆษณา... (สินค้าใหม่อาจใช้เวลา 5-15 วิ)";
+
   const brief = collectBrief();
-  const res = await fetch("/api/preview", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(brief),
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch("/api/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(brief),
+    });
+    data = await res.json();
+  } catch (e) {
+    alert("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง");
+    btn.disabled = false;
+    btn.textContent = originalText;
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = originalText;
   if (data.error) { alert("Error: " + data.error); return; }
 
   const container = document.getElementById("promptCards");
@@ -390,13 +405,25 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
   if (!confirm(`ยืนยันสร้างจริง ${checked.length} segment? จะหักเครดิตทันที`)) return;
 
   const brief = collectBrief();
-  document.getElementById("generateBtn").disabled = true;
-  const res = await fetch("/api/generate", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ brief, segment_ids: checked }),
-  });
-  const data = await res.json();
-  document.getElementById("generateBtn").disabled = false;
+  const genBtn = document.getElementById("generateBtn");
+  const genBtnOriginalText = genBtn.textContent;
+  genBtn.disabled = true;
+  genBtn.textContent = "⏳ กำลังส่งงานสร้างคลิป...";
+  let data;
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ brief, segment_ids: checked }),
+    });
+    data = await res.json();
+  } catch (e) {
+    alert("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง");
+    genBtn.disabled = false;
+    genBtn.textContent = genBtnOriginalText;
+    return;
+  }
+  genBtn.disabled = false;
+  genBtn.textContent = genBtnOriginalText;
   if (data.error) { alert("Error: " + data.error); return; }
 
   const jobsSection = document.getElementById("jobsSection");

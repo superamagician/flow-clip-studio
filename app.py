@@ -361,7 +361,7 @@ AI_COPY_FIELDS = ["hook_line_1", "hook_line_2", "feature_tag_1", "feature_tag_2"
 AI_FILL_FIELDS = AI_COPY_FIELDS + ["presenter_desc"]
 
 
-def autofill(brief: dict, uid: int | None = None) -> dict:
+def autofill(brief: dict, uid: int | None = None, skip_ai: bool = False) -> dict:
     brief = dict(brief)
     name = (brief.get("product_name") or "").strip() or "สินค้านี้"
     if not brief.get("product_id"):
@@ -390,7 +390,7 @@ def autofill(brief: dict, uid: int | None = None) -> dict:
 
     needs_ai_copy = any(not brief.get(f) for f in AI_FILL_FIELDS)
     ai_copy = ai_copywriter.generate_copy(name, brief.get("product_visual_desc", "")) \
-        if needs_ai_copy and ai_copywriter.enabled() else None
+        if needs_ai_copy and not skip_ai and ai_copywriter.enabled() else None
     if ai_copy:
         brief["_ai_copy_used"] = True
 
@@ -999,12 +999,13 @@ def _read_batch_csv(file_storage) -> list[dict]:
     return list(reader)
 
 
-def _batch_row_to_brief(row: dict, image_map: dict[str, str], uid: int | None = None) -> dict:
+def _batch_row_to_brief(row: dict, image_map: dict[str, str], uid: int | None = None,
+                         skip_ai: bool = False) -> dict:
     brief = {k: (row.get(k) or "").strip() for k in BATCH_FIELDS if k != "reference_image_filename"}
     ref_name = (row.get("reference_image_filename") or "").strip()
     if ref_name and ref_name in image_map:
         brief["reference_image"] = image_map[ref_name]
-    return autofill(brief, uid)
+    return autofill(brief, uid, skip_ai=skip_ai)
 
 
 @app.route("/batch")
@@ -1044,7 +1045,7 @@ def api_batch_preview():
     products = []
     total_segments = 0
     for row in rows:
-        brief = _batch_row_to_brief(row, {}, uid)
+        brief = _batch_row_to_brief(row, {}, uid, skip_ai=True)
         try:
             segment_count = len(bbf.build_rows(brief))
         except Exception as exc:  # noqa: BLE001

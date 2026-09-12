@@ -74,10 +74,22 @@ document.getElementById("previewBtn").addEventListener("click", async () => {
   const csvFile = document.getElementById("csvFile").files[0];
   if (!csvFile) { alert("เลือกไฟล์ CSV ก่อน"); return; }
 
-  const fd = new FormData();
-  fd.append("csv", csvFile);
-  const res = await fetch("/api/batch_preview", { method: "POST", body: fd });
-  const data = await res.json();
+  const btn = document.getElementById("previewBtn");
+  btn.disabled = true;
+  btn.textContent = "⏳ กำลังตรวจไฟล์...";
+  let data;
+  try {
+    const fd = new FormData();
+    fd.append("csv", csvFile);
+    const res = await fetch("/api/batch_preview", { method: "POST", body: fd });
+    data = await res.json();
+  } catch (e) {
+    alert("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง");
+    return;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "👁 Preview (ฟรี ไม่หักเครดิต)";
+  }
   if (data.error) { alert("Error: " + data.error); return; }
 
   lastProductCount = data.products.length;
@@ -114,10 +126,20 @@ document.getElementById("confirmBtn").addEventListener("click", async () => {
   fd.append("csv", csvFile);
   for (const f of imageFiles) fd.append("images", f);
 
-  document.getElementById("confirmBtn").disabled = true;
-  const res = await fetch("/api/batch_generate", { method: "POST", body: fd });
-  const data = await res.json();
-  document.getElementById("confirmBtn").disabled = false;
+  const confirmBtn = document.getElementById("confirmBtn");
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = "⏳ กำลังส่งงานสร้างคลิป... (สินค้าใหม่หลายชิ้นอาจใช้เวลาหลายสิบวินาที)";
+  let data;
+  try {
+    const res = await fetch("/api/batch_generate", { method: "POST", body: fd });
+    data = await res.json();
+  } catch (e) {
+    alert("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง");
+    return;
+  } finally {
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = "🔴 ยืนยันสร้างจริงทั้งหมด";
+  }
   if (data.error) { alert("Error: " + data.error); return; }
 
   const jobsSection = document.getElementById("jobsSection");
