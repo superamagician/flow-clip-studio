@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}คู่มือการใช้งาน - Flow Clip Studio{% endblock %}
+{% block page_title %}คู่มือการใช้งาน{% endblock %}
+{% block head %}
+<style>
+  .guide-section { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+                   padding: 18px 20px; margin-bottom: 16px; }
+  .guide-section h3 { margin: 0 0 8px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .guide-section p, .guide-section li { font-size: 13px; line-height: 1.7; color: var(--text); }
+  .guide-section ol, .guide-section ul { margin: 6px 0; padding-left: 20px; }
+  .guide-section .note { background: var(--accent-soft); color: var(--accent); border-radius: 8px;
+                          padding: 8px 12px; font-size: 12.5px; margin-top: 8px; }
+  .guide-section .warn { background: var(--danger-soft); color: var(--danger); border-radius: 8px;
+                          padding: 8px 12px; font-size: 12.5px; margin-top: 8px; }
+  code { background: var(--bg-alt); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+</style>
+{% endblock %}
+{% block content %}
+  <div class="guide-section">
+    <h3>✏️ สร้างคลิป</h3>
+    <ol>
+      <li>อัปโหลด <b>รูปสินค้า</b> — แนะนำครอปให้เหลือสินค้าชิ้นเดียวชัดๆ (ไม่เอาพื้นหลัง/ตัวหนังสือเยอะ) จะได้คลิปที่หน้าตาตรงปกที่สุด</li>
+      <li>ตั้ง <b>ชื่อสินค้า</b> — ระบบจะเลือกตัวละครพรีเซนเตอร์ให้อัตโนมัติตามหมวดสินค้าที่พิมพ์</li>
+      <li>เลือก <b>แนวคลิป (genre)</b>: <code>hook_feature_cta</code> (สไตล์ทั่วไป มีคนพูด), <code>asmr</code> (ไม่มีคนพูด เน้นเสียง/สัมผัส), <code>pov</code> (มุมมองคนดูเอง), <code>minimal</code> (เรียบหรู)</li>
+      <li>กด <b>สร้างคลิปโฆษณา</b> → ระบบจะโชว์พรอมต์ที่แต่งให้ก่อน (ยังไม่หักเครดิต) ตรวจดูแล้วกด <b>ยืนยันสร้างจริง</b></li>
+      <li>ถ้าเลือกสร้างครบ 3 segment (A+B+C) ระบบจะ<b>ต่อเป็นคลิปเดียว 30 วิให้อัตโนมัติ</b>หลังสร้างเสร็จ</li>
+    </ol>
+    <div class="note">เปิด "ปรับแต่งเพิ่มเติม" เพื่อกรอก hook/feature/CTA เอง, เลือกตัวละครจากคลัง, ใส่ลายน้ำ/โลโก้กันก๊อบปี้</div>
+  </div>
+
+  <div class="guide-section">
+    <h3>🎭 ตัวละคร (พรีเซนเตอร์)</h3>
+    <p>ระบบมีตัวละครสำเร็จรูป 6 คน (คลิกเลือกได้ในหน้าสร้างคลิป) แต่ละคนออกแบบให้เหมาะกับสินค้าคนละแบบ พิมพ์ชื่อสินค้าแล้วออกจากช่อง ระบบจะเลือกให้อัตโนมัติ — ยังเปลี่ยนเองได้เสมอ</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>🔖 ลายน้ำ / โลโก้กันก๊อบปี้</h3>
+    <p>ใส่ข้อความหรืออัปโหลดโลโก้ในส่วน "ปรับแต่งเพิ่มเติม" เลือกตำแหน่งและความโปร่งใสได้ ระบบจะเบิร์นทับคลิปทุก segment ให้อัตโนมัติหลังสร้างเสร็จ (ไม่ต้องทำเอง)</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>📝 แคปชั่น + แฮชแท็ก</h3>
+    <p>หลังกรอกข้อมูลสินค้าในหน้าสร้างคลิป เลื่อนลงไปที่ส่วน "แคปชั่น + แฮชแท็ก" เลือกแพลตฟอร์ม (TikTok/Facebook/Shopee) แล้วกดสร้าง — ได้ข้อความพร้อมคัดลอกไปโพสต์ทันที</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>🗂 คลังคลิปทั้งหมด</h3>
+    <p>ดูคลิปทั้งหมดที่เคยสร้าง แยกแท็บตามสินค้า เล่นดูได้ในหน้าเว็บโดยตรง</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>⬇️ จัดการไฟล์ดาวน์โหลด</h3>
+    <p>ดูขนาดไฟล์แต่ละคลิป + พื้นที่ใช้ทั้งหมด, ดาวน์โหลดไฟล์ลงเครื่อง, หรือลบไฟล์ที่ไม่ใช้แล้วเพื่อประหยัดพื้นที่</p>
+    <div class="warn">การลบไฟล์เป็นการลบถาวร กู้คืนไม่ได้</div>
+  </div>
+
+  <div class="guide-section">
+    <h3>📊 รายงานผลงาน</h3>
+    <p>สรุปจำนวนคลิป, ความยาวรวม, อัตราความสำเร็จของงานที่ส่งไปสร้าง, แยกตามสินค้าและตามวัน</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>📜 ประวัติการทำงาน</h3>
+    <p>บันทึกทุกครั้งที่ preview / สั่งสร้างคลิป / งานเสร็จ-ล้มเหลว / ต่อคลิป — ใช้ตรวจสอบย้อนหลังได้ว่าเกิดอะไรขึ้นบ้าง</p>
+  </div>
+
+  <div class="guide-section">
+    <h3>⚙️ ตั้งค่า API</h3>
+    <p>ใส่ <code>USEAPI_TOKEN</code> ของตัวเอง (จาก useapi.net) และอีเมล Google Flow ที่เชื่อมไว้ — ข้อมูลถูกเข้ารหัสก่อนบันทึก เห็นได้เฉพาะบัญชีของคุณเท่านั้น ไม่ปนกับผู้ใช้คนอื่น</p>
+    <div class="warn">ไม่มี USEAPI_TOKEN จะสร้างคลิปจริงไม่ได้ (Preview ยังใช้ได้ปกติเพราะไม่เสียเครดิต)</div>
+  </div>
+{% endblock %}

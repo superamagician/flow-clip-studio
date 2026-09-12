@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}รายงานผลงาน - Flow Clip Studio{% endblock %}
+{% block page_title %}รายงานผลงาน{% endblock %}
+{% block head %}
+<style>
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .stat-card .label { font-size: 12px; color: var(--muted); }
+  .stat-card .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+  .stat-card .value.ok { color: var(--ok); }
+  .stat-card .value.danger { color: var(--danger); }
+  .section { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+             padding: 18px; margin-bottom: 20px; }
+  .section h3 { margin: 0 0 14px; font-size: 14px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 12.5px; }
+  .bar-label { width: 140px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { flex: 1; background: var(--bg-alt); border-radius: 999px; height: 16px; overflow: hidden; }
+  .bar-fill { background: var(--accent); height: 100%; border-radius: 999px; }
+  .bar-count { width: 40px; text-align: right; color: var(--muted); flex-shrink: 0; }
+  .empty { color: var(--muted); text-align: center; padding: 20px; }
+</style>
+{% endblock %}
+{% block content %}
+  <div class="stat-grid" id="statGrid"></div>
+  <div class="section">
+    <h3>คลิปแยกตามสินค้า</h3>
+    <div id="categoryBars"></div>
+  </div>
+  <div class="section">
+    <h3>คลิปที่สร้างต่อวัน</h3>
+    <div id="dayBars"></div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+  async function main() {
+    const res = await fetch("/api/reports");
+    const data = await res.json();
+
+    const cards = [
+      { label: "คลิปทั้งหมด", value: data.total_clips },
+      { label: "ความยาวรวม", value: Math.round(data.total_duration) + "s" },
+      { label: "งานที่ส่ง", value: data.jobs_submitted },
+      { label: "สำเร็จ", value: data.jobs_completed, cls: "ok" },
+      { label: "ล้มเหลว", value: data.jobs_failed, cls: data.jobs_failed ? "danger" : "" },
+      { label: "อัตราสำเร็จ", value: data.success_rate != null ? data.success_rate + "%" : "-" },
+    ];
+    document.getElementById("statGrid").innerHTML = cards.map(c => `
+      <div class="stat-card"><div class="label">${c.label}</div><div class="value ${c.cls || ''}">${c.value}</div></div>
+    `).join("");
+
+    const catEl = document.getElementById("categoryBars");
+    if (!data.by_category.length) {
+      catEl.innerHTML = '<div class="empty">ยังไม่มีข้อมูล</div>';
+    } else {
+      const max = Math.max(...data.by_category.map(c => c.count));
+      catEl.innerHTML = data.by_category.map(c => `
+        <div class="bar-row">
+          <div class="bar-label" title="${c.category}">${c.category}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${(c.count / max * 100).toFixed(0)}%"></div></div>
+          <div class="bar-count">${c.count}</div>
+        </div>
+      `).join("");
+    }
+
+    const dayEl = document.getElementById("dayBars");
+    if (!data.by_day.length) {
+      dayEl.innerHTML = '<div class="empty">ยังไม่มีข้อมูล</div>';
+    } else {
+      const maxDay = Math.max(...data.by_day.map(d => d.count));
+      dayEl.innerHTML = data.by_day.map(d => `
+        <div class="bar-row">
+          <div class="bar-label">${d.day}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${(d.count / maxDay * 100).toFixed(0)}%"></div></div>
+          <div class="bar-count">${d.count}</div>
+        </div>
+      `).join("");
+    }
+  }
+  main();
+</script>
+{% endblock %}

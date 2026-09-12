@@ -229,6 +229,19 @@ def clip_exists(user_id: int, file: str) -> bool:
         return cur.fetchone() is not None
 
 
+def get_clip(user_id: int, clip_id: int) -> dict | None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM clips WHERE user_id = %s AND id = %s", (user_id, clip_id))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def delete_clip(user_id: int, clip_id: int) -> None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM clips WHERE user_id = %s AND id = %s", (user_id, clip_id))
+        conn.commit()
+
+
 def list_clips(user_id: int) -> list[dict]:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT * FROM clips WHERE user_id = %s ORDER BY created_at", (user_id,))

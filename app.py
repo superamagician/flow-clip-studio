@@ -392,6 +392,102 @@ def log_page():
     return render_template("log.html", active="log")
 
 
+@app.route("/downloads")
+@login_required
+def downloads_page():
+    return render_template("downloads.html", active="downloads")
+
+
+@app.route("/reports")
+@login_required
+def reports_page():
+    return render_template("reports.html", active="reports")
+
+
+@app.route("/guide")
+@login_required
+def guide_page():
+    return render_template("guide.html", active="guide")
+
+
+@app.route("/api/downloads")
+@login_required
+def api_downloads():
+    uid = current_user_id()
+    outputs_dir = user_dir(uid) / "outputs"
+    clips = db.list_clips(uid)
+    total_bytes = 0
+    result = []
+    for clip in clips:
+        path = outputs_dir / clip["file"]
+        size = path.stat().st_size if path.exists() else 0
+        total_bytes += size
+        result.append({**clip, "size_bytes": size, "exists": path.exists()})
+    return jsonify({"clips": result, "total_bytes": total_bytes})
+
+
+@app.route("/api/downloads/<int:clip_id>", methods=["DELETE"])
+@login_required
+def api_delete_clip(clip_id: int):
+    uid = current_user_id()
+    clip = db.get_clip(uid, clip_id)
+    if not clip:
+        return jsonify({"error": "ไม่พบคลิปนี้"}), 404
+    outputs_dir = user_dir(uid) / "outputs"
+    for rel in (clip["file"], clip.get("thumbnail")):
+        if rel:
+            path = outputs_dir / rel
+            if path.exists():
+                path.unlink()
+    db.delete_clip(uid, clip_id)
+    db.log_event(uid, "clip_deleted", file=clip["file"], category=clip.get("category"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/reports")
+@login_required
+def api_reports():
+    uid = current_user_id()
+    clips = db.list_clips(uid)
+    logs = db.list_log(uid, limit=2000)
+
+    by_category: dict[str, dict] = {}
+    total_duration = 0.0
+    for c in clips:
+        cat = c.get("category") or "ไม่ระบุ"
+        entry = by_category.setdefault(cat, {"count": 0, "duration": 0.0})
+        entry["count"] += 1
+        entry["duration"] += float(c.get("duration") or 0)
+        total_duration += float(c.get("duration") or 0)
+
+    by_day: dict[str, int] = {}
+    for c in clips:
+        day = (c.get("created_at") or "")[:10]
+        if day:
+            by_day[day] = by_day.get(day, 0) + 1
+
+    action_counts: dict[str, int] = {}
+    for entry in logs:
+        action_counts[entry["action"]] = action_counts.get(entry["action"], 0) + 1
+
+    submitted = action_counts.get("job_submitted", 0)
+    completed = action_counts.get("job_completed", 0)
+    failed = action_counts.get("job_failed", 0) + action_counts.get("job_submit_failed", 0)
+
+    return jsonify({
+        "total_clips": len(clips),
+        "total_duration": round(total_duration, 1),
+        "by_category": [{"category": k, **v} for k, v in
+                         sorted(by_category.items(), key=lambda kv: -kv[1]["count"])],
+        "by_day": [{"day": k, "count": v} for k, v in sorted(by_day.items())],
+        "jobs_submitted": submitted,
+        "jobs_completed": completed,
+        "jobs_failed": failed,
+        "success_rate": round(completed / submitted * 100, 1) if submitted else None,
+        "flow_remaining_credits": latest_flow_credits(uid),
+    })
+
+
 # ---------------------------------------------------------------------------
 # API: preview / captions / characters
 # ---------------------------------------------------------------------------
