@@ -84,6 +84,8 @@
         <legend>รายละเอียดสินค้า &amp; พรีเซนเตอร์</legend>
         <label>Product ID (ภาษาอังกฤษ ไม่มีเว้นวรรค — ปล่อยว่างได้)</label>
         <input type="text" name="product_id" placeholder="ระบบจะตั้งให้อัตโนมัติจากชื่อสินค้า">
+        <label>ลิงก์สินค้า (Shopee/TikTok Shop/Lazada — สำหรับปักตะกร้า ใส่ไว้แคปชั่นจะแนบให้อัตโนมัติ)</label>
+        <input type="text" name="product_link" placeholder="เช่น https://shopee.co.th/product/...">
         <label>คำอธิบายรูปลักษณ์สินค้า (ภาษาอังกฤษ — ปล่อยว่างได้)</label>
         <textarea name="product_visual_desc"></textarea>
         <label>เลือกตัวละคร (พรีเซนเตอร์จากคลัง — ไม่บังคับ)</label>
@@ -171,7 +173,7 @@
   </div>
 
   <fieldset style="margin-top:24px">
-    <legend>📝 แคปชั่น + แฮชแท็ก (ใช้ข้อมูลจากฟอร์มด้านบน)</legend>
+    <legend>📝 แคปชั่น + แฮชแท็ก (ใช้ข้อมูลจากฟอร์มด้านบน — ถ้าใส่ลิงก์สินค้าไว้ จะแนบให้อัตโนมัติ พร้อมคัดลอกไปปักตะกร้าได้เลย)</legend>
     <label>สร้างย้อนหลังจากสินค้าที่เคยสร้างไว้ (ไม่บังคับ — เลือกแล้วฟอร์มด้านบนจะเติมข้อมูลให้อัตโนมัติ)</label>
     <select id="pastProductSelect">
       <option value="">-- เลือกสินค้าเก่า หรือกรอกฟอร์มด้านบนเอง --</option>

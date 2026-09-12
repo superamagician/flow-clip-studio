@@ -93,9 +93,15 @@ GENERATORS = {
 
 
 def generate(brief: dict, platforms: list[str]) -> dict:
+    link = field(brief, "product_link")
     result = {}
     for platform in platforms:
         generator = GENERATORS.get(platform)
-        if generator:
-            result[platform] = generator(brief)
+        if not generator:
+            continue
+        data = generator(brief)
+        if link:
+            for caption in data["captions"]:
+                caption["text"] = f"{caption['text']}\n🔗 {link}".strip()
+        result[platform] = data
     return result

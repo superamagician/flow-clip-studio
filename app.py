@@ -922,7 +922,7 @@ def api_generate():
 BATCH_FIELDS = ["product_id", "product_name", "product_visual_desc", "presenter_desc",
                 "hook_line_1", "hook_line_2", "feature_tag_1", "feature_tag_2", "feature_tag_3",
                 "upgrade_hook_1", "upgrade_hook_2", "cta_text", "genre", "genres", "duration",
-                "reference_image_filename"]
+                "reference_image_filename", "product_link"]
 
 BATCH_EXAMPLE_ROW = {
     "product_id": "my_product_01", "product_name": "หูฟังเกมมิ่ง XYZ",
@@ -931,7 +931,7 @@ BATCH_EXAMPLE_ROW = {
     "feature_tag_1": "เสียงชัด", "feature_tag_2": "ใส่สบาย", "feature_tag_3": "ไฟสวย",
     "upgrade_hook_1": "อัปเกรดชุดเกม", "upgrade_hook_2": "ให้ได้เปรียบกว่าเดิม",
     "cta_text": "พิกัดตะกร้าด้านล่างเลย", "genre": "hook_feature_cta", "genres": "", "duration": "10",
-    "reference_image_filename": "my_product_01.jpg",
+    "reference_image_filename": "my_product_01.jpg", "product_link": "https://shopee.co.th/product/...",
 }
 
 
