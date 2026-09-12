@@ -2,7 +2,7 @@
 """Safe, dependency-free useapi.net Google Flow REST client."""
 
 from __future__ import annotations
-import argparse, csv, json, mimetypes, os, re, sys, time
+import argparse, csv, json, os, re, sys, time
 from pathlib import Path
 import urllib.error, urllib.parse, urllib.request
 
@@ -11,6 +11,8 @@ MODELS = {"veo-3.1-quality", "veo-3.1-fast", "veo-3.1-lite",
           "veo-3.1-lite-low-priority", "omni-flash"}
 ASPECTS = {"landscape", "portrait", "1:1", "4:3", "3:4"}
 TERMINAL = {"completed", "failed"}
+EXT_MIME_MAP = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png", ".webp": "image/webp", ".mp4": "video/mp4"}
 
 
 def load_env(path: Path) -> None:
@@ -57,9 +59,13 @@ class Client:
         path = file_path.expanduser().resolve()
         if not path.is_file():
             raise ValueError(f"Reference not found: {path}")
-        mime = mimetypes.guess_type(path.name)[0]
+        # Use an explicit extension->mime map rather than mimetypes.guess_type(),
+        # which reads OS-provided mime.types files and is inconsistent across
+        # platforms (observed returning None for plain .png files on a minimal
+        # Linux container even though the same code works fine on Windows).
+        mime = EXT_MIME_MAP.get(path.suffix.lower())
         if mime not in {"image/png", "image/jpeg", "image/webp", "video/mp4"}:
-            raise ValueError(f"Unsupported reference type: {mime or 'unknown'}")
+            raise ValueError(f"Unsupported reference type: {mime or 'unknown'} (file: {path.name})")
         endpoint = "/assets" + (
             "/" + urllib.parse.quote(email, safe="") if email else "")
         result = self.request("POST", endpoint, path.read_bytes(), mime)
