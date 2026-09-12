@@ -202,6 +202,14 @@ async function pollJob(jobId, segmentId, productId) {
       const video = document.createElement("video");
       video.src = data.file_url; video.controls = true;
       cardEl.appendChild(video);
+      if (segmentId && !cardEl.querySelector(".regenBtn")) {
+        const regenBtn = document.createElement("button");
+        regenBtn.type = "button";
+        regenBtn.className = "secondary regenBtn";
+        regenBtn.textContent = "🔄 ไม่ถูกใจ สร้างใหม่";
+        regenBtn.addEventListener("click", () => retrySegment(segmentId, productId, cardEl, regenBtn));
+        cardEl.appendChild(regenBtn);
+      }
       return;
     }
     if (data.status === "failed") {

@@ -1009,6 +1009,25 @@ def api_retry_segment():
     return jsonify({"result": results[0]})
 
 
+@app.route("/api/product_clips/<path:product_id>")
+@login_required
+def api_product_clips(product_id: str):
+    """Latest completed clip per segment letter (A/B/C) for one product - lets the
+    frontend offer an explicit "combine A+B+C" action that works even when the
+    three segments were generated/regenerated separately across different visits,
+    not just when all three finish together in one submission."""
+    uid = current_user_id()
+    outputs_dir = user_dir(uid) / "outputs"
+    latest: dict[str, dict] = {}
+    for clip in db.list_clips(uid):  # ascending by created_at, so later entries overwrite earlier ones
+        if clip.get("product_id") != product_id:
+            continue
+        letter = (clip.get("segment") or "")[:1].upper()
+        if letter in ("A", "B", "C"):
+            latest[letter] = clip
+    return jsonify({letter: clip_view(clip, outputs_dir) for letter, clip in latest.items()})
+
+
 # ---------------------------------------------------------------------------
 # Batch (multiple products in one CSV upload)
 # ---------------------------------------------------------------------------
@@ -1241,9 +1260,23 @@ def api_concatenate():
         return jsonify({"error": "ต้องมีอย่างน้อย 2 คลิปถึงจะต่อได้"}), 400
 
     filenames = [Path(u).name for u in file_urls]
-    for fname in filenames:
-        if not (outputs_dir / fname).exists():
-            return jsonify({"error": f"ไม่พบไฟล์ {fname}"}), 400
+    missing = []
+    for url, fname in zip(file_urls, filenames):
+        local_path = outputs_dir / fname
+        if local_path.exists():
+            continue
+        # Segments combined by Auto Pilot may have been generated in an earlier
+        # container lifetime (local disk wiped by a redeploy/retention) - fall back
+        # to re-downloading from Supabase Storage before giving up on this file.
+        if url.startswith("http://") or url.startswith("https://"):
+            try:
+                gfr.download(url, local_path)
+                continue
+            except Exception:  # noqa: BLE001
+                pass
+        missing.append(fname)
+    if missing:
+        return jsonify({"error": f"ไม่พบไฟล์ {', '.join(missing)} (อาจถูกลบไปแล้ว)"}), 400
 
     list_lines = "\n".join(f"file '{(outputs_dir / f).resolve()}'" for f in filenames) + "\n"
     list_path = outputs_dir / f"_concat_{uuid.uuid4().hex}.txt"

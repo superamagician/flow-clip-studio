@@ -171,6 +171,8 @@
   <div id="jobsSection">
     <h2>สถานะงาน</h2>
     <div id="jobCards"></div>
+    <button type="button" id="autoPilotBtn">🚀 Auto Pilot: รวมคลิป A+B+C ล่าสุด</button>
+    <div class="sub">ใช้ตัว A/B/C ที่เสร็จล่าสุดของสินค้านี้มาต่อกัน แม้จะสร้าง/สร้างใหม่แยกกันคนละรอบก็รวมได้</div>
   </div>
 
   <fieldset style="margin-top:24px">
@@ -194,6 +196,7 @@
 {% block scripts %}
 <script>
 let refPath = "";
+let currentProductId = null;
 
 document.getElementById("refFile").addEventListener("change", async (e) => {
   const file = e.target.files[0];
@@ -325,6 +328,7 @@ document.getElementById("pastProductSelect").addEventListener("change", async (e
       document.querySelectorAll(".genreCheck").forEach(cb => { cb.checked = genreValues.includes(cb.value); });
       updateGenreNote();
     }
+    currentProductId = productId;
   } catch (e) { alert("โหลดข้อมูลสินค้าเก่าไม่สำเร็จ"); }
 });
 
@@ -434,6 +438,7 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
   jobsSection.scrollIntoView({ behavior: "smooth" });
 
   const okResults = data.results.filter(r => !r.error);
+  if (okResults.length) currentProductId = okResults[0].product_id || currentProductId;
   const tracker = {
     expected: okResults.length,
     doneCount: 0,
@@ -498,6 +503,14 @@ async function pollJob(jobId, slot, tracker, segmentId, productId) {
       video.src = data.file_url;
       video.controls = true;
       cardEl.appendChild(video);
+      if (segmentId && !cardEl.querySelector(".regenBtn")) {
+        const regenBtn = document.createElement("button");
+        regenBtn.type = "button";
+        regenBtn.className = "secondary regenBtn";
+        regenBtn.textContent = "🔄 ไม่ถูกใจ สร้างใหม่";
+        regenBtn.addEventListener("click", () => retrySegment(segmentId, productId, cardEl, regenBtn));
+        cardEl.appendChild(regenBtn);
+      }
       loadStatus();
       if (tracker) {
         tracker.files[slot] = data.file_url;
@@ -552,6 +565,7 @@ async function retrySegment(segmentId, productId, cardEl, btnEl) {
     btnEl.textContent = "🔄 ลองใหม่";
     return;
   }
+  currentProductId = result.product_id || currentProductId;
   cardEl.id = "job-" + result.job_id;
   cardEl.innerHTML = `
     <div style="flex:1">
@@ -592,6 +606,39 @@ async function checkAutoConcat(tracker) {
   video.controls = true;
   combinedCard.appendChild(video);
 }
+
+document.getElementById("autoPilotBtn").addEventListener("click", async () => {
+  if (!currentProductId) { alert("ยังไม่มีสินค้าให้รวม — สร้างคลิปอย่างน้อย 1 segment ก่อน หรือเลือกสินค้าเก่าจาก dropdown ในส่วนแคปชั่นด้านล่าง"); return; }
+
+  const btn = document.getElementById("autoPilotBtn");
+  btn.disabled = true;
+  btn.textContent = "⏳ กำลังหาคลิป A/B/C ล่าสุด...";
+  let clips;
+  try {
+    const res = await fetch("/api/product_clips/" + encodeURIComponent(currentProductId));
+    clips = await res.json();
+  } catch (e) {
+    alert("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง");
+    btn.disabled = false;
+    btn.textContent = "🚀 Auto Pilot: รวมคลิป A+B+C ล่าสุด";
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = "🚀 Auto Pilot: รวมคลิป A+B+C ล่าสุด";
+
+  const letters = ["A", "B", "C"].filter(l => clips[l] && clips[l].url);
+  if (letters.length < 2) {
+    alert(`สินค้านี้มีคลิปที่เสร็จแล้วแค่ ${letters.length} จาก 3 (${letters.join(", ") || "ไม่มีเลย"}) ต้องมีอย่างน้อย 2 ตัวถึงจะรวมได้`);
+    return;
+  }
+  if (!confirm(`พบคลิป ${letters.join(" + ")} ล่าสุดของสินค้านี้ ยืนยันรวมเป็นคลิปเดียว?`)) return;
+
+  const jobsSection = document.getElementById("jobsSection");
+  const jobCards = document.getElementById("jobCards");
+  jobsSection.style.display = "block";
+  const files = letters.map(l => clips[l].url);
+  await checkAutoConcat({ files, category: clips[letters[0]].category, productId: currentProductId });
+});
 
 const PLATFORM_LABELS = { tiktok: "TikTok", facebook: "Facebook", shopee: "Shopee Video" };
 
