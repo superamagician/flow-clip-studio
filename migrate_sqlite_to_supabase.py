@@ -10,13 +10,27 @@ Run once:
 """
 from __future__ import annotations
 import json
+import os
 import sqlite3
 from pathlib import Path
 
-import db  # the new Postgres-backed module
-
 ROOT = Path(__file__).resolve().parent
 SQLITE_PATH = ROOT / "app.db"
+
+
+def _load_dotenv(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv(ROOT / ".env")
+
+import db  # noqa: E402  (must come after _load_dotenv so DATABASE_URL is set)
 
 
 def main():
