@@ -536,13 +536,21 @@ def api_suggest_character():
     return jsonify({"character": suggest_character(current_user_id(), text)})
 
 
+ALLOWED_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+UNSUPPORTED_IMAGE_MSG = ("รองรับเฉพาะไฟล์รูป .jpg .jpeg .png .webp เท่านั้น — ถ้าถ่ายจาก iPhone "
+                          "แล้วได้ไฟล์ .heic ให้เปลี่ยนตั้งค่ากล้องเป็น \"Most Compatible\" "
+                          "(Settings > Camera > Formats) แล้วถ่ายใหม่ หรือแปลงไฟล์เป็น .jpg ก่อนอัปโหลด")
+
+
 @app.route("/api/upload_reference", methods=["POST"])
 @login_required
 def api_upload_reference():
     file = request.files.get("file")
     if not file or not file.filename:
         return jsonify({"error": "No file uploaded"}), 400
-    ext = Path(file.filename).suffix or ".jpg"
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_IMAGE_EXTS:
+        return jsonify({"error": UNSUPPORTED_IMAGE_MSG}), 400
     dest = user_dir(current_user_id()) / "uploads" / f"{uuid.uuid4().hex}{ext}"
     file.save(dest)
     return jsonify({"path": str(dest)})
@@ -729,12 +737,18 @@ def api_batch_generate():
     if len(rows) > 30:
         return jsonify({"error": f"รองรับสูงสุด 30 สินค้าต่อรอบ (ไฟล์นี้มี {len(rows)})"}), 400
 
-    # Save any uploaded reference images, keyed by their original filename
+    # Validate all image formats up front - reject the whole batch before submitting
+    # anything if any file is unsupported, rather than failing mid-way per product.
+    image_files = [f for f in request.files.getlist("images") if f.filename]
+    bad_files = [f.filename for f in image_files
+                 if Path(f.filename).suffix.lower() not in ALLOWED_IMAGE_EXTS]
+    if bad_files:
+        return jsonify({"error": f"{UNSUPPORTED_IMAGE_MSG} (ไฟล์ที่มีปัญหา: {', '.join(bad_files)})"}), 400
+
+    # Save uploaded reference images, keyed by their original filename
     image_map: dict[str, str] = {}
-    for f in request.files.getlist("images"):
-        if not f.filename:
-            continue
-        ext = Path(f.filename).suffix or ".jpg"
+    for f in image_files:
+        ext = Path(f.filename).suffix.lower()
         dest = user_dir(uid) / "uploads" / f"{uuid.uuid4().hex}{ext}"
         f.save(dest)
         image_map[f.filename] = str(dest)
