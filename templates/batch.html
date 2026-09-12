@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}สร้างแบบ Batch - Flow Clip Studio{% endblock %}
+{% block page_title %}สร้างคลิปแบบ Batch (หลายสินค้าในรอบเดียว){% endblock %}
+{% block head %}
+<style>
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
+             margin: 16px 0; background: var(--panel); }
+  legend { padding: 0 8px; color: var(--muted); font-size: 13px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  button { background: var(--accent); color: #fff; border: none; border-radius: 8px;
+           padding: 10px 18px; font-size: 14px; cursor: pointer; margin-top: 8px; }
+  button.secondary { background: var(--panel); border: 1px solid var(--border); color: var(--text); }
+  button.spend { background: var(--danger); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { text-align: left; padding: 6px 10px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+  th { background: var(--bg-alt); color: var(--muted); }
+  .job-card { display: flex; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--border);
+              border-radius: var(--radius); padding: 10px; margin-bottom: 8px; }
+  .job-card video { width: 90px; aspect-ratio: 9/16; background: #000; border-radius: 6px; }
+  .status-pending { color: var(--warn); }
+  .status-completed { color: var(--ok); }
+  .status-failed { color: var(--danger); }
+  #previewSection, #jobsSection { display: none; }
+  .note { background: var(--accent-soft); color: var(--accent); border-radius: 8px; padding: 10px 14px; font-size: 12.5px; }
+</style>
+{% endblock %}
+{% block content %}
+  <div class="sub">
+    อัปโหลดไฟล์ CSV ที่มีข้อมูลสินค้าหลายรายการ (สูงสุด 30 สินค้าต่อรอบ = 90 segment) ระบบจะสร้างคลิปครบ 3 segment (Hook/Feature/CTA) ต่อสินค้าให้อัตโนมัติ
+  </div>
+
+  <fieldset>
+    <legend>ขั้นที่ 1: เตรียมไฟล์</legend>
+    <p style="font-size:13px">โหลด template ไปกรอกข้อมูลสินค้าแต่ละแถว (แถวละ 1 สินค้า)</p>
+    <a href="/api/batch_template" class="secondary" style="display:inline-block;padding:8px 16px;border:1px solid var(--border);border-radius:8px;font-size:13px">⬇️ ดาวน์โหลด Template CSV</a>
+    <div class="note" style="margin-top:12px">
+      ถ้าต้องการแนบรูปสินค้า: ตั้งชื่อไฟล์รูปให้ตรงกับคอลัมน์ <code>reference_image_filename</code> ในแถวนั้น แล้วอัปโหลดรูปทั้งหมดพร้อมกันในขั้นที่ 2 (ไม่แนบก็ได้ — ระบบจะแต่งคำอธิบายสินค้าทั่วไปให้แทน)
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>ขั้นที่ 2: อัปโหลด</legend>
+    <label>ไฟล์ CSV ที่กรอกแล้ว</label>
+    <input type="file" id="csvFile" accept=".csv">
+    <label>รูปสินค้า (เลือกได้หลายไฟล์พร้อมกัน — ไม่บังคับ)</label>
+    <input type="file" id="imageFiles" accept="image/*" multiple>
+    <br>
+    <button type="button" id="previewBtn">👁 Preview (ฟรี ไม่หักเครดิต)</button>
+  </fieldset>
+
+  <div id="previewSection">
+    <h2>Preview รายการสินค้า</h2>
+    <div id="previewTable"></div>
+    <button type="button" class="spend" id="confirmBtn">🔴 ยืนยันสร้างจริงทั้งหมด</button>
+    <button type="button" class="secondary" id="backBtn">← กลับไปแก้ไฟล์</button>
+  </div>
+
+  <div id="jobsSection">
+    <h2>สถานะงาน</h2>
+    <div id="jobCards"></div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+let lastProductCount = 0;
+
+document.getElementById("previewBtn").addEventListener("click", async () => {
+  const csvFile = document.getElementById("csvFile").files[0];
+  if (!csvFile) { alert("เลือกไฟล์ CSV ก่อน"); return; }
+
+  const fd = new FormData();
+  fd.append("csv", csvFile);
+  const res = await fetch("/api/batch_preview", { method: "POST", body: fd });
+  const data = await res.json();
+  if (data.error) { alert("Error: " + data.error); return; }
+
+  lastProductCount = data.products.length;
+  const rows = data.products.map((p, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${p.product_id}</td>
+      <td>${p.product_name}</td>
+      <td>${p.has_reference_filename ? "✅ มีชื่อไฟล์รูป" : "— ไม่มี (ใช้ค่าอัตโนมัติ)"}</td>
+    </tr>
+  `).join("");
+  document.getElementById("previewTable").innerHTML = `
+    <table>
+      <thead><tr><th>#</th><th>Product ID</th><th>ชื่อสินค้า</th><th>รูปอ้างอิง</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p style="font-size:13px;margin-top:10px"><b>${data.products.length}</b> สินค้า × 3 segment = <b>${data.total_segments}</b> คลิปที่จะสร้าง (หักเครดิตตามจำนวนนี้)</p>
+  `;
+  document.getElementById("previewSection").style.display = "block";
+  document.getElementById("previewSection").scrollIntoView({ behavior: "smooth" });
+});
+
+document.getElementById("backBtn").addEventListener("click", () => {
+  document.getElementById("previewSection").style.display = "none";
+});
+
+document.getElementById("confirmBtn").addEventListener("click", async () => {
+  if (!confirm(`ยืนยันสร้างจริง ${lastProductCount} สินค้า (${lastProductCount * 3} คลิป)? จะหักเครดิตทันที`)) return;
+
+  const csvFile = document.getElementById("csvFile").files[0];
+  const imageFiles = document.getElementById("imageFiles").files;
+  const fd = new FormData();
+  fd.append("csv", csvFile);
+  for (const f of imageFiles) fd.append("images", f);
+
+  document.getElementById("confirmBtn").disabled = true;
+  const res = await fetch("/api/batch_generate", { method: "POST", body: fd });
+  const data = await res.json();
+  document.getElementById("confirmBtn").disabled = false;
+  if (data.error) { alert("Error: " + data.error); return; }
+
+  const jobsSection = document.getElementById("jobsSection");
+  const jobCards = document.getElementById("jobCards");
+  jobsSection.style.display = "block";
+  jobsSection.scrollIntoView({ behavior: "smooth" });
+
+  data.results.forEach(r => {
+    const card = document.createElement("div");
+    card.className = "job-card";
+    card.id = "job-" + (r.job_id || Math.random());
+    if (r.error) {
+      card.innerHTML = `<div><b>${r.product_name || r.product_id}</b> (${r.segment_id}): <span class="status-failed">ล้มเหลว - ${r.error}</span></div>`;
+      jobCards.appendChild(card);
+      return;
+    }
+    card.innerHTML = `
+      <div style="flex:1">
+        <div><b>${r.product_name}</b> — ${r.segment_id}</div>
+        <div class="status-pending" id="status-${r.job_id}">กำลังสร้าง...</div>
+      </div>
+    `;
+    jobCards.appendChild(card);
+    pollJob(r.job_id);
+  });
+});
+
+async function pollJob(jobId) {
+  const statusEl = document.getElementById("status-" + jobId);
+  const cardEl = document.getElementById("job-" + jobId);
+  const tick = async () => {
+    const res = await fetch("/api/status/" + encodeURIComponent(jobId));
+    const data = await res.json();
+    if (data.status === "completed" && data.file_url) {
+      statusEl.textContent = "เสร็จแล้ว";
+      statusEl.className = "status-completed";
+      const video = document.createElement("video");
+      video.src = data.file_url; video.controls = true;
+      cardEl.appendChild(video);
+      return;
+    }
+    if (data.status === "failed") {
+      statusEl.textContent = "ล้มเหลว"; statusEl.className = "status-failed";
+      return;
+    }
+    statusEl.textContent = "สถานะ: " + data.status + " ...";
+    setTimeout(tick, 8000);
+  };
+  tick();
+}
+</script>
+{% endblock %}

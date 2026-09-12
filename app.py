@@ -12,7 +12,9 @@ fully isolated in SQLite (db.py) + per-user folders under userdata/<user_id>/.
 Still runs on one machine (no cloud hosting / billing yet — that's Phase 2).
 """
 from __future__ import annotations
+import csv
 import functools
+import io
 import json
 import os
 import re
@@ -26,7 +28,7 @@ import uuid
 from pathlib import Path
 
 from flask import (Flask, jsonify, request, render_template, send_from_directory,
-                    session, redirect, url_for, flash)
+                    session, redirect, url_for, flash, Response)
 
 ROOT = Path(__file__).resolve().parent
 USERDATA_DIR = ROOT / "userdata"
@@ -563,13 +565,9 @@ def api_flow_accounts():
 # API: generate / concatenate / status
 # ---------------------------------------------------------------------------
 
-@app.route("/api/generate", methods=["POST"])
-@login_required
-def api_generate():
-    uid = current_user_id()
-    payload = request.get_json(force=True)
-    brief = autofill(payload.get("brief") or {})
-    segment_ids = set(payload.get("segment_ids") or [])
+def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[dict]:
+    """Core submission loop shared by the single-product form and batch upload.
+    Returns a list of {segment_id, job_id, status} or {segment_id, error}."""
     category = brief.get("product_name") or brief.get("product_id") or "ไม่ระบุสินค้า"
     variant = brief.get("variant_label", "")
     watermark = {
@@ -580,15 +578,8 @@ def api_generate():
     }
     account_email = brief.get("account_email") or db.get_credential(uid, "GOOGLE_FLOW_EMAIL")
 
-    try:
-        rows = bbf.build_rows(brief)
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": str(exc)}), 400
-
+    rows = bbf.build_rows(brief)
     client = get_client(uid)
-    if not client.token:
-        return jsonify({"error": "ยังไม่ได้ตั้งค่า USEAPI_TOKEN — ไปที่หน้า ตั้งค่า ก่อน"}), 400
-
     outputs_dir = user_dir(uid) / "outputs"
     db.log_event(uid, "generate_request", category=category, segment_ids=sorted(segment_ids),
                  account_email=account_email, has_watermark=bool(watermark["text"] or watermark["logo"]))
@@ -619,8 +610,151 @@ def api_generate():
         except Exception as exc:  # noqa: BLE001
             db.log_event(uid, "job_submit_failed", segment_id=row["id"], category=category, error=str(exc))
             results.append({"segment_id": row["id"], "error": str(exc)})
+    return results
+
+
+@app.route("/api/generate", methods=["POST"])
+@login_required
+def api_generate():
+    uid = current_user_id()
+    payload = request.get_json(force=True)
+    brief = autofill(payload.get("brief") or {})
+    segment_ids = set(payload.get("segment_ids") or [])
+
+    client = get_client(uid)
+    if not client.token:
+        return jsonify({"error": "ยังไม่ได้ตั้งค่า USEAPI_TOKEN — ไปที่หน้า ตั้งค่า ก่อน"}), 400
+
+    try:
+        results = submit_brief_segments(uid, brief, segment_ids)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 400
 
     return jsonify({"results": results})
+
+
+# ---------------------------------------------------------------------------
+# Batch (multiple products in one CSV upload)
+# ---------------------------------------------------------------------------
+
+BATCH_FIELDS = ["product_id", "product_name", "product_visual_desc", "presenter_desc",
+                "hook_line_1", "hook_line_2", "feature_tag_1", "feature_tag_2", "feature_tag_3",
+                "upgrade_hook_1", "upgrade_hook_2", "cta_text", "genre", "duration",
+                "reference_image_filename"]
+
+BATCH_EXAMPLE_ROW = {
+    "product_id": "my_product_01", "product_name": "หูฟังเกมมิ่ง XYZ",
+    "product_visual_desc": "a black gaming headset with blue LED accents",
+    "presenter_desc": "", "hook_line_1": "เสียงไม่อิน?", "hook_line_2": "ไมค์ไม่มา?",
+    "feature_tag_1": "เสียงชัด", "feature_tag_2": "ใส่สบาย", "feature_tag_3": "ไฟสวย",
+    "upgrade_hook_1": "อัปเกรดชุดเกม", "upgrade_hook_2": "ให้ได้เปรียบกว่าเดิม",
+    "cta_text": "พิกัดตะกร้าด้านล่างเลย", "genre": "hook_feature_cta", "duration": "10",
+    "reference_image_filename": "my_product_01.jpg",
+}
+
+
+def _read_batch_csv(file_storage) -> list[dict]:
+    text = file_storage.read().decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    return list(reader)
+
+
+def _batch_row_to_brief(row: dict, image_map: dict[str, str]) -> dict:
+    brief = {k: (row.get(k) or "").strip() for k in BATCH_FIELDS if k != "reference_image_filename"}
+    ref_name = (row.get("reference_image_filename") or "").strip()
+    if ref_name and ref_name in image_map:
+        brief["reference_image"] = image_map[ref_name]
+    return autofill(brief)
+
+
+@app.route("/batch")
+@login_required
+def batch_page():
+    return render_template("batch.html", active="batch")
+
+
+@app.route("/api/batch_template")
+@login_required
+def api_batch_template():
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=BATCH_FIELDS)
+    writer.writeheader()
+    writer.writerow(BATCH_EXAMPLE_ROW)
+    return Response(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=batch_template.csv"})
+
+
+@app.route("/api/batch_preview", methods=["POST"])
+@login_required
+def api_batch_preview():
+    file = request.files.get("csv")
+    if not file:
+        return jsonify({"error": "ไม่พบไฟล์ CSV"}), 400
+    try:
+        rows = _read_batch_csv(file)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": f"อ่านไฟล์ CSV ไม่ได้: {exc}"}), 400
+    if not rows:
+        return jsonify({"error": "ไฟล์ CSV ไม่มีข้อมูล"}), 400
+    if len(rows) > 30:
+        return jsonify({"error": f"รองรับสูงสุด 30 สินค้าต่อรอบ (ไฟล์นี้มี {len(rows)})"}), 400
+
+    products = []
+    for row in rows:
+        brief = _batch_row_to_brief(row, {})
+        products.append({
+            "product_id": brief["product_id"],
+            "product_name": brief["product_name"],
+            "has_reference_filename": bool((row.get("reference_image_filename") or "").strip()),
+        })
+    return jsonify({"products": products, "total_segments": len(products) * 3})
+
+
+@app.route("/api/batch_generate", methods=["POST"])
+@login_required
+def api_batch_generate():
+    uid = current_user_id()
+    client = get_client(uid)
+    if not client.token:
+        return jsonify({"error": "ยังไม่ได้ตั้งค่า USEAPI_TOKEN — ไปที่หน้า ตั้งค่า ก่อน"}), 400
+
+    file = request.files.get("csv")
+    if not file:
+        return jsonify({"error": "ไม่พบไฟล์ CSV"}), 400
+    try:
+        rows = _read_batch_csv(file)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": f"อ่านไฟล์ CSV ไม่ได้: {exc}"}), 400
+    if len(rows) > 30:
+        return jsonify({"error": f"รองรับสูงสุด 30 สินค้าต่อรอบ (ไฟล์นี้มี {len(rows)})"}), 400
+
+    # Save any uploaded reference images, keyed by their original filename
+    image_map: dict[str, str] = {}
+    for f in request.files.getlist("images"):
+        if not f.filename:
+            continue
+        ext = Path(f.filename).suffix or ".jpg"
+        dest = user_dir(uid) / "uploads" / f"{uuid.uuid4().hex}{ext}"
+        f.save(dest)
+        image_map[f.filename] = str(dest)
+
+    db.log_event(uid, "batch_generate_request", product_count=len(rows))
+
+    all_results = []
+    for row in rows:
+        brief = _batch_row_to_brief(row, image_map)
+        segment_ids = {f"{brief['product_id']}_a", f"{brief['product_id']}_b", f"{brief['product_id']}_c"}
+        try:
+            product_results = submit_brief_segments(uid, brief, segment_ids)
+        except Exception as exc:  # noqa: BLE001
+            product_results = [{"segment_id": brief["product_id"], "error": str(exc)}]
+        for r in product_results:
+            r["product_id"] = brief["product_id"]
+            r["product_name"] = brief["product_name"]
+        all_results.extend(product_results)
+
+    return jsonify({"results": all_results})
 
 
 @app.route("/api/status/<path:job_id>")
