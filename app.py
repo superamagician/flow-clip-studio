@@ -1245,8 +1245,6 @@ def api_batch_generate():
     return jsonify({"results": all_results})
 
 
-@app.route("/api/status/<path:job_id>")
-@login_required
 def _submit_next_chained(uid: int, client, clean_frame_path: Path, chain_data: dict,
                           watermark: dict) -> dict | None:
     """Submit the next segment in a chain using clean_frame_path (the just-finished
@@ -1271,12 +1269,23 @@ def extract_last_frame(video_path: Path, frame_path: Path) -> None:
         capture_output=True, check=True)
 
 
+@app.route("/api/status/<path:job_id>")
+@login_required
 def api_job_status(job_id: str):
     uid = current_user_id()
     outputs_dir = user_dir(uid) / "outputs"
     client = get_client(uid)
-    result = client.job(job_id)
-    record_flow_credits(uid, result)
+    try:
+        result = client.job(job_id)
+        record_flow_credits(uid, result)
+    except Exception as exc:  # noqa: BLE001
+        # A raw failure reaching useapi.net itself (network blip, their API having
+        # a moment) used to crash this whole endpoint with a 500 before status
+        # could even be read - report back as still-processing so the frontend's
+        # poll loop just retries instead of burning through its error-streak limit
+        # and giving up on a job that's actually fine.
+        db.log_event(uid, "status_fetch_failed", job_id=job_id, error=str(exc))
+        return jsonify({"status": "processing", "file_url": None})
     status = str(result.get("status", "unknown")).lower()
     safe_name = gfr.safe_filename(job_id)
     gfr.save_json(result, outputs_dir / "jobs" / f"{safe_name}.json")
