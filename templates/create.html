@@ -396,9 +396,23 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
 async function pollJob(jobId, slot, tracker) {
   const statusEl = document.getElementById("status-" + jobId);
   const cardEl = document.getElementById("job-" + jobId);
+  let errorStreak = 0;
   const tick = async () => {
-    const res = await fetch("/api/status/" + encodeURIComponent(jobId));
-    const data = await res.json();
+    let data;
+    try {
+      const res = await fetch("/api/status/" + encodeURIComponent(jobId));
+      data = await res.json();
+      errorStreak = 0;
+    } catch (e) {
+      errorStreak++;
+      if (errorStreak >= 10) {
+        statusEl.textContent = "เช็คสถานะไม่ได้ (เครือข่ายมีปัญหา) — รีเฟรชหน้าเพื่อลองใหม่";
+        statusEl.className = "status-failed";
+        return;
+      }
+      setTimeout(tick, 8000);
+      return;
+    }
     if (data.status === "completed" && data.file_url) {
       statusEl.textContent = "เสร็จแล้ว";
       statusEl.className = "status-completed";

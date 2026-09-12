@@ -381,6 +381,27 @@ def pop_pending_job(job_id: str) -> dict | None:
         return result
 
 
+def peek_pending_job(job_id: str) -> dict | None:
+    """Like pop_pending_job but doesn't delete - lets the caller finish all
+    processing (download/ffmpeg/DB write) before removing it, so a retry
+    after a mid-way failure still has the real category/segment/watermark
+    instead of falling back to a generic placeholder."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM pending_jobs WHERE job_id = %s", (job_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["watermark"] = json.loads(result.get("watermark") or "{}")
+        return result
+
+
+def delete_pending_job(job_id: str) -> None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM pending_jobs WHERE job_id = %s", (job_id,))
+        conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Flow credit balance (persisted so a Render redeploy doesn't blank it out -
 # see flow_credits table comment in init_db)

@@ -1006,45 +1006,56 @@ def api_job_status(job_id: str):
 
     file_url = None
     if status == "completed":
-        media = gfr.get_media(result)
-        existing = list(outputs_dir.glob(f"{safe_name}_*.mp4"))
-        if existing:
-            file_url = f"/outputs/{existing[0].name}"
-        elif media and media[0].get("videoUrl"):
-            out_path = outputs_dir / f"{safe_name}_01.mp4"
-            gfr.download(media[0]["videoUrl"], out_path)
-            file_url = f"/outputs/{out_path.name}"
+        try:
+            media = gfr.get_media(result)
+            existing = list(outputs_dir.glob(f"{safe_name}_*.mp4"))
+            if existing:
+                file_url = f"/outputs/{existing[0].name}"
+            elif media and media[0].get("videoUrl"):
+                out_path = outputs_dir / f"{safe_name}_01.mp4"
+                gfr.download(media[0]["videoUrl"], out_path)
+                file_url = f"/outputs/{out_path.name}"
 
-        if file_url:
-            fname = Path(file_url).name
-            if not db.clip_exists(uid, fname):
-                video_path = outputs_dir / fname
-                meta = db.pop_pending_job(job_id) or {
-                    "category": "ทดสอบ", "segment": fname, "variant": "", "watermark": {}}
-                try:
-                    apply_watermark(video_path, meta.get("watermark"))
-                except subprocess.CalledProcessError as exc:
-                    db.log_event(uid, "watermark_failed", job_id=job_id,
-                                 error=exc.stderr[-300:] if exc.stderr else str(exc))
+            if file_url:
+                fname = Path(file_url).name
+                if not db.clip_exists(uid, fname):
+                    video_path = outputs_dir / fname
+                    meta = db.peek_pending_job(job_id) or {
+                        "category": "ทดสอบ", "segment": fname, "variant": "", "watermark": {}}
+                    try:
+                        apply_watermark(video_path, meta.get("watermark"))
+                    except subprocess.CalledProcessError as exc:
+                        db.log_event(uid, "watermark_failed", job_id=job_id,
+                                     error=exc.stderr[-300:] if exc.stderr else str(exc))
 
-                info = ffprobe_info(video_path)
-                thumb_name = video_path.stem + ".jpg"
-                thumb_path = outputs_dir / "thumbnails" / thumb_name
-                try:
-                    make_thumbnail(video_path, thumb_path)
-                except subprocess.CalledProcessError:
-                    thumb_name = None
-                storage_urls = upload_clip_to_storage(
-                    uid, video_path, thumb_path if thumb_name else None)
-                db.add_clip(uid, {
-                    "file": fname, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
-                    "category": meta["category"], "segment": meta["segment"],
-                    "variant": meta["variant"], **info, **storage_urls,
-                })
-                db.log_event(uid, "job_completed", job_id=job_id, category=meta["category"],
-                             segment=meta["segment"], file=fname, duration=info["duration"])
-                if storage_urls.get("storage_url"):
-                    file_url = storage_urls["storage_url"]
+                    info = ffprobe_info(video_path)
+                    thumb_name = video_path.stem + ".jpg"
+                    thumb_path = outputs_dir / "thumbnails" / thumb_name
+                    try:
+                        make_thumbnail(video_path, thumb_path)
+                    except subprocess.CalledProcessError:
+                        thumb_name = None
+                    storage_urls = upload_clip_to_storage(
+                        uid, video_path, thumb_path if thumb_name else None)
+                    db.add_clip(uid, {
+                        "file": fname, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
+                        "category": meta["category"], "segment": meta["segment"],
+                        "variant": meta["variant"], **info, **storage_urls,
+                    })
+                    db.delete_pending_job(job_id)
+                    db.log_event(uid, "job_completed", job_id=job_id, category=meta["category"],
+                                 segment=meta["segment"], file=fname, duration=info["duration"])
+                    if storage_urls.get("storage_url"):
+                        file_url = storage_urls["storage_url"]
+        except Exception as exc:  # noqa: BLE001
+            # The Flow job itself finished - only OUR post-processing (download /
+            # ffmpeg / DB write) failed, often a transient network blip on Render.
+            # Report back as still-processing so the frontend keeps polling and
+            # retries automatically instead of this endpoint 500ing, which used
+            # to silently kill the browser's poll loop for that one segment
+            # (uncaught fetch/json errors there have no retry logic).
+            db.log_event(uid, "status_processing_failed", job_id=job_id, error=str(exc))
+            return jsonify({"status": "processing", "file_url": None})
     elif status == "failed":
         db.log_event(uid, "job_failed", job_id=job_id)
 
