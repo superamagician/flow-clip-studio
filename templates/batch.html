@@ -153,8 +153,8 @@ document.getElementById("confirmBtn").addEventListener("click", async () => {
   data.results.forEach(r => {
     const card = document.createElement("div");
     card.className = "job-card";
-    card.id = "job-" + (r.job_id || Math.random());
     if (r.error) {
+      card.id = "job-" + Math.random();
       card.innerHTML = `
         <div style="flex:1">
           <div><b>${r.product_name || r.product_id}</b> (${r.segment_id}): <span class="status-failed">ล้มเหลว - ${r.error}</span></div>
@@ -165,6 +165,18 @@ document.getElementById("confirmBtn").addEventListener("click", async () => {
       card.querySelector(".retryBtn").addEventListener("click", (e) => retrySegment(r.segment_id, r.product_id, card, e.target));
       return;
     }
+    if (r.status === "queued_chain") {
+      card.id = "chainwait-" + r.segment_id;
+      card.innerHTML = `
+        <div style="flex:1">
+          <div><b>${r.product_name || r.product_id}</b> — ${r.segment_id}</div>
+          <div class="status-pending">รอต่อจาก segment ก่อนหน้า...</div>
+        </div>
+      `;
+      jobCards.appendChild(card);
+      return;
+    }
+    card.id = "job-" + r.job_id;
     card.innerHTML = `
       <div style="flex:1">
         <div><b>${r.product_name}</b> — ${r.segment_id}</div>
@@ -172,11 +184,11 @@ document.getElementById("confirmBtn").addEventListener("click", async () => {
       </div>
     `;
     jobCards.appendChild(card);
-    pollJob(r.job_id, r.segment_id, r.product_id);
+    pollJob(r.job_id, r.segment_id, r.product_id, r.product_name);
   });
 });
 
-async function pollJob(jobId, segmentId, productId) {
+async function pollJob(jobId, segmentId, productId, productName) {
   const statusEl = document.getElementById("status-" + jobId);
   const cardEl = document.getElementById("job-" + jobId);
   let errorStreak = 0;
@@ -209,6 +221,19 @@ async function pollJob(jobId, segmentId, productId) {
         regenBtn.textContent = "🔄 ไม่ถูกใจ สร้างใหม่";
         regenBtn.addEventListener("click", () => retrySegment(segmentId, productId, cardEl, regenBtn));
         cardEl.appendChild(regenBtn);
+      }
+      if (data.next_job_id && data.next_segment_id) {
+        const waitingCard = document.getElementById("chainwait-" + data.next_segment_id);
+        if (waitingCard) {
+          waitingCard.id = "job-" + data.next_job_id;
+          waitingCard.innerHTML = `
+            <div style="flex:1">
+              <div><b>${productName || ""}</b> — ${data.next_segment_id}</div>
+              <div class="status-pending" id="status-${data.next_job_id}">กำลังสร้างต่อเนื่องจาก segment ก่อนหน้า...</div>
+            </div>
+          `;
+          pollJob(data.next_job_id, data.next_segment_id, productId, productName);
+        }
       }
       return;
     }

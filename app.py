@@ -897,6 +897,45 @@ def api_flow_accounts():
 # API: generate / concatenate / status
 # ---------------------------------------------------------------------------
 
+def _submit_one_row(client, uid: int, row: dict, account_email: str, category: str,
+                     row_variant: str, watermark: dict, product_id: str, outputs_dir: Path,
+                     start_image_path: str = "", chain_remaining: list[dict] | None = None) -> dict:
+    """Submit exactly one segment's row to Flow. If chain_remaining is given, the
+    next queued row (plus whatever's after it) is stashed on this job's
+    pending_jobs entry so /api/status/<job_id> can auto-submit it - with this
+    segment's actual last frame as its start image - the moment this one
+    finishes, instead of the next segment being generated independently."""
+    references = [row["reference_images"]] if row.get("reference_images") else []
+    try:
+        gfr.validate(row["model"], row["aspect_ratio"], row["resolution"],
+                     int(row["duration"]), int(row["count"]))
+        gfr_payload = gfr.build_payload(
+            client, row["prompt"], row["model"], row["aspect_ratio"],
+            row["resolution"], int(row["duration"]), int(row["count"]),
+            account_email, start_image_path, references, do_upload=True)
+        api_result = client.submit(gfr_payload)
+        record_flow_credits(uid, api_result)
+        jid = gfr.get_job_id(api_result)
+        if not jid:
+            raise RuntimeError("Submission returned no job ID")
+        safe_name = gfr.safe_filename(jid)
+        gfr.save_json(api_result, outputs_dir / "jobs" / f"{safe_name}.json")
+        segment_label = {"a": "A - Hook", "b": "B - Feature", "c": "C - CTA"}.get(
+            row["id"].rsplit("_", 1)[-1], row["id"])
+        chain_json = (json.dumps({"remaining": chain_remaining, "email": account_email,
+                                   "product_id": product_id, "category": category,
+                                   "variant": row_variant})
+                      if chain_remaining else None)
+        db.set_pending_job(jid, uid, category, segment_label, row_variant, watermark,
+                            product_id, chain_json)
+        db.log_event(uid, "job_submitted", job_id=jid, segment_id=row["id"], category=category,
+                      chained=bool(start_image_path))
+        return {"segment_id": row["id"], "job_id": jid, "status": "submitted", "product_id": product_id}
+    except Exception as exc:  # noqa: BLE001
+        db.log_event(uid, "job_submit_failed", segment_id=row["id"], category=category, error=str(exc))
+        return {"segment_id": row["id"], "error": str(exc), "product_id": product_id}
+
+
 def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[dict]:
     """Core submission loop shared by the single-product form and batch upload.
     Returns a list of {segment_id, job_id, status} or {segment_id, error}."""
@@ -909,7 +948,8 @@ def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[
         "opacity": brief.get("watermark_opacity") or 0.6,
     }
     account_email = brief.get("account_email") or db.get_credential(uid, "GOOGLE_FLOW_EMAIL")
-    db.save_brief(uid, brief.get("product_id") or category, category, brief)
+    product_id = brief.get("product_id", "")
+    db.save_brief(uid, product_id or category, category, brief)
 
     rows = bbf.build_rows(brief)
     client = get_client(uid)
@@ -923,36 +963,40 @@ def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[
     # with no way to know which style is which.
     multi_genre = len({r.get("genre") for r in rows if r.get("genre")}) > 1
 
-    results = []
+    # Group rows into their a/b/c triplet (same product+genre) so a request for
+    # A, or A+B, or A+B+C together can chain: only the first row is submitted now,
+    # the rest wait for the previous one to actually finish so the next segment
+    # starts from its real last frame instead of an independently imagined scene.
+    # A selection that doesn't start from "a" (e.g. just "b", or "b"+"c" without
+    # "a") has no real frame to chain from in this request, so those submit
+    # independently exactly as before.
+    groups: dict[str, list[dict]] = {}
     for row in rows:
-        if row["id"] not in segment_ids:
+        groups.setdefault(row["id"].rsplit("_", 1)[0], []).append(row)
+
+    results = []
+    for group_rows in groups.values():
+        selected = [r for r in group_rows if r["id"] in segment_ids]
+        if not selected:
             continue
-        row_variant = variant or (row.get("genre", "") if multi_genre else "")
-        references = [row["reference_images"]] if row.get("reference_images") else []
-        try:
-            gfr.validate(row["model"], row["aspect_ratio"], row["resolution"],
-                         int(row["duration"]), int(row["count"]))
-            gfr_payload = gfr.build_payload(
-                client, row["prompt"], row["model"], row["aspect_ratio"],
-                row["resolution"], int(row["duration"]), int(row["count"]),
-                account_email, "", references, do_upload=True)
-            api_result = client.submit(gfr_payload)
-            record_flow_credits(uid, api_result)
-            jid = gfr.get_job_id(api_result)
-            if not jid:
-                raise RuntimeError("Submission returned no job ID")
-            safe_name = gfr.safe_filename(jid)
-            gfr.save_json(api_result, outputs_dir / "jobs" / f"{safe_name}.json")
-            segment_label = {"a": "A - Hook", "b": "B - Feature", "c": "C - CTA"}.get(
-                row["id"].rsplit("_", 1)[-1], row["id"])
-            db.set_pending_job(jid, uid, category, segment_label, row_variant, watermark,
-                                brief.get("product_id", ""))
-            db.log_event(uid, "job_submitted", job_id=jid, segment_id=row["id"], category=category)
-            results.append({"segment_id": row["id"], "job_id": jid, "status": "submitted",
-                             "product_id": brief.get("product_id", "")})
-        except Exception as exc:  # noqa: BLE001
-            db.log_event(uid, "job_submit_failed", segment_id=row["id"], category=category, error=str(exc))
-            results.append({"segment_id": row["id"], "error": str(exc), "product_id": brief.get("product_id", "")})
+        chain = len(selected) >= 2 and selected == group_rows[:len(selected)]
+        if chain:
+            first, rest = selected[0], selected[1:]
+            row_variant = variant or (first.get("genre", "") if multi_genre else "")
+            results.append(_submit_one_row(client, uid, first, account_email, category,
+                                            row_variant, watermark, product_id, outputs_dir,
+                                            chain_remaining=rest))
+            # No job_id yet for these - they're waiting on `first` to actually finish
+            # (see /api/status/<job_id>'s chain hand-off) so the frontend can still
+            # show one card per requested segment instead of some just missing.
+            for queued_row in rest:
+                results.append({"segment_id": queued_row["id"], "status": "queued_chain",
+                                 "product_id": product_id})
+        else:
+            for row in selected:
+                row_variant = variant or (row.get("genre", "") if multi_genre else "")
+                results.append(_submit_one_row(client, uid, row, account_email, category,
+                                                row_variant, watermark, product_id, outputs_dir))
     return results
 
 
@@ -1177,6 +1221,30 @@ def api_batch_generate():
 
 @app.route("/api/status/<path:job_id>")
 @login_required
+def _submit_next_chained(uid: int, client, clean_frame_path: Path, chain_data: dict,
+                          watermark: dict) -> dict | None:
+    """Submit the next segment in a chain using clean_frame_path (the just-finished
+    segment's real last frame, extracted before watermarking) as its start image -
+    so it visually continues from where the previous one actually left off instead
+    of an independently imagined scene."""
+    remaining = chain_data.get("remaining") or []
+    if not remaining:
+        return None
+    next_row, rest = remaining[0], remaining[1:]
+    outputs_dir = user_dir(uid) / "outputs"
+    return _submit_one_row(
+        client, uid, next_row, chain_data.get("email", ""), chain_data.get("category", ""),
+        chain_data.get("variant", ""), watermark, chain_data.get("product_id", ""), outputs_dir,
+        start_image_path=str(clean_frame_path), chain_remaining=rest or None)
+
+
+def extract_last_frame(video_path: Path, frame_path: Path) -> None:
+    frame_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [FFMPEG, "-y", "-sseof", "-3", "-i", str(video_path), "-update", "1", "-q:v", "2", str(frame_path)],
+        capture_output=True, check=True)
+
+
 def api_job_status(job_id: str):
     uid = current_user_id()
     outputs_dir = user_dir(uid) / "outputs"
@@ -1188,6 +1256,7 @@ def api_job_status(job_id: str):
     gfr.save_json(result, outputs_dir / "jobs" / f"{safe_name}.json")
 
     file_url = None
+    next_info = {}
     if status == "completed":
         try:
             media = gfr.get_media(result)
@@ -1205,6 +1274,22 @@ def api_job_status(job_id: str):
                     video_path = outputs_dir / fname
                     meta = db.peek_pending_job(job_id) or {
                         "category": "ทดสอบ", "segment": fname, "variant": "", "watermark": {}}
+
+                    chain_json_str = meta.get("chain_json")
+                    chain_data = json.loads(chain_json_str) if chain_json_str else None
+                    chain_frame_path = None
+                    if chain_data:
+                        # Extract BEFORE watermarking - the seed frame for the next
+                        # segment must be the clean scene, not one with a burned-in
+                        # logo/text that Flow would otherwise try to keep drawing.
+                        chain_frame_path = outputs_dir / f"_chainframe_{uuid.uuid4().hex}.jpg"
+                        try:
+                            extract_last_frame(video_path, chain_frame_path)
+                        except subprocess.CalledProcessError as exc:
+                            db.log_event(uid, "chain_frame_failed", job_id=job_id,
+                                         error=exc.stderr[-300:] if exc.stderr else str(exc))
+                            chain_frame_path = None
+
                     try:
                         apply_watermark(video_path, meta.get("watermark"))
                     except subprocess.CalledProcessError as exc:
@@ -1231,6 +1316,21 @@ def api_job_status(job_id: str):
                                  segment=meta["segment"], file=fname, duration=info["duration"])
                     if storage_urls.get("storage_url"):
                         file_url = storage_urls["storage_url"]
+
+                    if chain_data and chain_frame_path:
+                        try:
+                            next_result = _submit_next_chained(
+                                uid, client, chain_frame_path, chain_data, meta.get("watermark"))
+                            if next_result and not next_result.get("error"):
+                                next_info = {"next_job_id": next_result["job_id"],
+                                             "next_segment_id": next_result["segment_id"]}
+                            elif next_result:
+                                db.log_event(uid, "chain_submit_failed", job_id=job_id,
+                                             error=next_result.get("error"))
+                        except Exception as exc:  # noqa: BLE001
+                            db.log_event(uid, "chain_submit_failed", job_id=job_id, error=str(exc))
+                        finally:
+                            chain_frame_path.unlink(missing_ok=True)
         except Exception as exc:  # noqa: BLE001
             # The Flow job itself finished - only OUR post-processing (download /
             # ffmpeg / DB write) failed, often a transient network blip on Render.
@@ -1243,7 +1343,7 @@ def api_job_status(job_id: str):
     elif status == "failed":
         db.log_event(uid, "job_failed", job_id=job_id)
 
-    return jsonify({"status": status, "file_url": file_url})
+    return jsonify({"status": status, "file_url": file_url, **next_info})
 
 
 @app.route("/api/concatenate", methods=["POST"])

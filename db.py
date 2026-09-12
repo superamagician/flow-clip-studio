@@ -123,9 +123,11 @@ def init_db() -> None:
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             category TEXT, segment TEXT, variant TEXT, watermark TEXT,
             created_at TEXT NOT NULL,
-            product_id TEXT
+            product_id TEXT,
+            chain_json TEXT
         );
         ALTER TABLE pending_jobs ADD COLUMN IF NOT EXISTS product_id TEXT;
+        ALTER TABLE pending_jobs ADD COLUMN IF NOT EXISTS chain_json TEXT;
 
         -- Latest known Flow credit balance per user. Previously this was
         -- read live from cached job JSON files under userdata/<uid>/outputs/jobs/,
@@ -373,15 +375,17 @@ def list_log(user_id: int, limit: int = 200) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def set_pending_job(job_id: str, user_id: int, category: str, segment: str,
-                     variant: str, watermark: dict, product_id: str = "") -> None:
+                     variant: str, watermark: dict, product_id: str = "",
+                     chain_json: str | None = None) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO pending_jobs (job_id, user_id, category, segment, variant, watermark, "
-            "created_at, product_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+            "created_at, product_id, chain_json) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (job_id) DO UPDATE SET category=EXCLUDED.category, segment=EXCLUDED.segment, "
-            "variant=EXCLUDED.variant, watermark=EXCLUDED.watermark, product_id=EXCLUDED.product_id",
+            "variant=EXCLUDED.variant, watermark=EXCLUDED.watermark, product_id=EXCLUDED.product_id, "
+            "chain_json=EXCLUDED.chain_json",
             (job_id, user_id, category, segment, variant, json.dumps(watermark or {}),
-             time.strftime("%Y-%m-%d %H:%M:%S"), product_id))
+             time.strftime("%Y-%m-%d %H:%M:%S"), product_id, chain_json))
         conn.commit()
 
 
