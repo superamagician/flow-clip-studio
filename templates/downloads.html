@@ -26,6 +26,10 @@
 {% endblock %}
 {% block content %}
   <div class="summary-bar" id="summaryBar"></div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+    <button type="button" class="btn" id="zipBtn">📦 ดาวน์โหลดที่เลือกเป็น ZIP</button>
+    <span id="selectedCount" style="font-size:12.5px;color:var(--muted)"></span>
+  </div>
   <div id="tableWrap"></div>
 {% endblock %}
 {% block scripts %}
@@ -61,6 +65,7 @@
     }
     const rows = clips.map(c => `
       <tr data-id="${c.id}">
+        <td>${c.exists ? `<input type="checkbox" class="clipCheck" value="${c.id}">` : ""}</td>
         <td>${c.thumbnail_url ? `<img class="thumb" src="${c.thumbnail_url}">` : ""}</td>
         <td>${c.category || "-"}<br><span style="color:var(--muted)">${c.segment || ""}</span></td>
         <td>${c.width || "?"}×${c.height || "?"} · ${c.duration || "?"}s</td>
@@ -73,10 +78,56 @@
       </tr>
     `).join("");
     wrap.innerHTML = `<table>
-      <thead><tr><th></th><th>สินค้า/segment</th><th>สเปก</th><th>ขนาดไฟล์</th><th>วันที่สร้าง</th><th>จัดการ</th></tr></thead>
+      <thead><tr>
+        <th><input type="checkbox" id="selectAllCheck"></th>
+        <th></th><th>สินค้า/segment</th><th>สเปก</th><th>ขนาดไฟล์</th><th>วันที่สร้าง</th><th>จัดการ</th>
+      </tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+    document.getElementById("selectAllCheck").addEventListener("change", (e) => {
+      document.querySelectorAll(".clipCheck").forEach(cb => cb.checked = e.target.checked);
+      updateSelectedCount();
+    });
+    document.querySelectorAll(".clipCheck").forEach(cb => cb.addEventListener("change", updateSelectedCount));
+    updateSelectedCount();
   }
+
+  function updateSelectedCount() {
+    const n = document.querySelectorAll(".clipCheck:checked").length;
+    document.getElementById("selectedCount").textContent = n ? `เลือกไว้ ${n} ไฟล์` : "";
+  }
+
+  document.getElementById("zipBtn").addEventListener("click", async () => {
+    const ids = [...document.querySelectorAll(".clipCheck:checked")].map(c => parseInt(c.value, 10));
+    if (!ids.length) { alert("เลือกไฟล์อย่างน้อย 1 ไฟล์ก่อน"); return; }
+
+    const btn = document.getElementById("zipBtn");
+    btn.disabled = true;
+    btn.textContent = "กำลังรวมไฟล์...";
+    try {
+      const res = await fetch("/api/downloads/zip", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clip_ids: ids }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert("ดาวน์โหลดล้มเหลว: " + (err.error || res.status));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `clips_${ids.length}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "📦 ดาวน์โหลดที่เลือกเป็น ZIP";
+    }
+  });
 
   async function deleteClip(id) {
     if (!confirm("ลบไฟล์นี้ถาวร? กู้คืนไม่ได้")) return;

@@ -25,6 +25,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -575,6 +576,55 @@ def api_delete_clip(clip_id: int):
     db.delete_clip(uid, clip_id)
     db.log_event(uid, "clip_deleted", file=clip["file"], category=clip.get("category"))
     return jsonify({"ok": True})
+
+
+def _read_clip_bytes(clip: dict, outputs_dir: Path) -> bytes | None:
+    local_path = outputs_dir / clip["file"]
+    if local_path.exists():
+        return local_path.read_bytes()
+    if clip.get("storage_url"):
+        try:
+            with urllib.request.urlopen(clip["storage_url"], timeout=60) as resp:
+                return resp.read()
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+            return None
+    return None
+
+
+@app.route("/api/downloads/zip", methods=["POST"])
+@login_required
+def api_downloads_zip():
+    uid = current_user_id()
+    outputs_dir = user_dir(uid) / "outputs"
+    clip_ids = (request.get_json(force=True) or {}).get("clip_ids") or []
+    if not clip_ids:
+        return jsonify({"error": "ไม่ได้เลือกไฟล์"}), 400
+
+    buf = io.BytesIO()
+    used_names: set[str] = set()
+    added = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for clip_id in clip_ids:
+            clip = db.get_clip(uid, clip_id)
+            if not clip:
+                continue
+            data = _read_clip_bytes(clip, outputs_dir)
+            if data is None:
+                continue
+            name = clip["file"]
+            if name in used_names:  # defensive - clip filenames are unique in practice
+                name = f"{clip_id}_{name}"
+            used_names.add(name)
+            zf.writestr(name, data)
+            added += 1
+
+    if not added:
+        return jsonify({"error": "ไม่พบไฟล์ที่เลือกเลย (อาจถูกลบ/หมดอายุไปแล้ว)"}), 404
+
+    db.log_event(uid, "downloads_zip", clip_count=added)
+    buf.seek(0)
+    return Response(buf.read(), mimetype="application/zip",
+                     headers={"Content-Disposition": "attachment; filename=clips.zip"})
 
 
 def _job_generation_seconds(logs: list[dict]) -> list[float]:
