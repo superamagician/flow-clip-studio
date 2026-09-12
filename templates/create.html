@@ -56,10 +56,15 @@
 
       <div class="row2">
         <div>
-          <label>แนวคลิป (genre)</label>
-          <select name="genre">
-            {% for g in genres %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
-          </select>
+          <label>แนวคลิป (genre) — เลือกได้มากกว่า 1 แนว (ไม่บังคับ)</label>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;padding:9px 0">
+            {% for g in genres %}
+            <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:var(--text);margin:0;font-weight:normal">
+              <input type="checkbox" class="genreCheck" value="{{ g }}" {% if loop.first %}checked{% endif %}> {{ g }}
+            </label>
+            {% endfor %}
+          </div>
+          <div class="sub" id="genreNote"></div>
         </div>
         <div>
           <label>ความยาวต่อ segment (วินาที)</label>
@@ -286,13 +291,25 @@ function collectBrief() {
   for (const [k, v] of fd.entries()) brief[k] = v;
   brief.reference_image = refPath;
   brief.watermark_logo = logoPath;
+  const genres = [...document.querySelectorAll(".genreCheck:checked")].map(c => c.value);
+  brief.genres = genres.join(",");
   return brief;
 }
+
+function updateGenreNote() {
+  const genres = [...document.querySelectorAll(".genreCheck:checked")];
+  const note = document.getElementById("genreNote");
+  note.textContent = genres.length > 1
+    ? `จะสร้าง ${genres.length} แนว × 3 segment = ${genres.length * 3} คลิป (หักเครดิตตามจำนวนนี้)`
+    : "";
+}
+document.querySelectorAll(".genreCheck").forEach(cb => cb.addEventListener("change", updateGenreNote));
 
 document.getElementById("createBtn").addEventListener("click", async () => {
   const nameEl = document.querySelector('[name="product_name"]');
   if (!nameEl.value.trim()) { alert("กรอกชื่อสินค้าก่อน"); return; }
   if (!refPath) { alert("อัปโหลดรูปสินค้าก่อน"); return; }
+  if (!document.querySelectorAll(".genreCheck:checked").length) { alert("เลือกแนวคลิปอย่างน้อย 1 แนว"); return; }
 
   const brief = collectBrief();
   const res = await fetch("/api/preview", {

@@ -38,6 +38,9 @@
     <div class="note" style="margin-top:12px">
       ถ้าต้องการแนบรูปสินค้า: ตั้งชื่อไฟล์รูปให้ตรงกับคอลัมน์ <code>reference_image_filename</code> ในแถวนั้น แล้วอัปโหลดรูปทั้งหมดพร้อมกันในขั้นที่ 2 (ไม่แนบก็ได้ — ระบบจะแต่งคำอธิบายสินค้าทั่วไปให้แทน)
     </div>
+    <div class="note" style="margin-top:8px">
+      ต้องการสร้างหลายแนวคลิปจากสินค้าเดียวกันพร้อมกัน (ไม่บังคับ): กรอกคอลัมน์ <code>genres</code> คั่นด้วยจุลภาค เช่น <code>hook_feature_cta,asmr</code> — จะได้ครบทุกแนวที่ระบุ (แนวละ 3 คลิป) หักเครดิตตามจำนวนที่เพิ่มขึ้นจริง ถ้าปล่อยว่าง ระบบจะใช้ค่าในคอลัมน์ <code>genre</code> ตัวเดียวตามปกติ
+    </div>
   </fieldset>
 
   <fieldset>
@@ -82,15 +85,16 @@ document.getElementById("previewBtn").addEventListener("click", async () => {
       <td>${i + 1}</td>
       <td>${p.product_id}</td>
       <td>${p.product_name}</td>
+      <td>${p.segment_count} คลิป${p.segment_count > 3 ? " (หลายแนว)" : ""}</td>
       <td>${p.has_reference_filename ? "✅ มีชื่อไฟล์รูป" : "— ไม่มี (ใช้ค่าอัตโนมัติ)"}</td>
     </tr>
   `).join("");
   document.getElementById("previewTable").innerHTML = `
     <table>
-      <thead><tr><th>#</th><th>Product ID</th><th>ชื่อสินค้า</th><th>รูปอ้างอิง</th></tr></thead>
+      <thead><tr><th>#</th><th>Product ID</th><th>ชื่อสินค้า</th><th>จำนวนคลิป</th><th>รูปอ้างอิง</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    <p style="font-size:13px;margin-top:10px"><b>${data.products.length}</b> สินค้า × 3 segment = <b>${data.total_segments}</b> คลิปที่จะสร้าง (หักเครดิตตามจำนวนนี้)</p>
+    <p style="font-size:13px;margin-top:10px"><b>${data.products.length}</b> สินค้า รวม <b>${data.total_segments}</b> คลิปที่จะสร้าง (หักเครดิตตามจำนวนนี้)</p>
   `;
   document.getElementById("previewSection").style.display = "block";
   document.getElementById("previewSection").scrollIntoView({ behavior: "smooth" });

@@ -748,10 +748,17 @@ def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[
     db.log_event(uid, "generate_request", category=category, segment_ids=sorted(segment_ids),
                  account_email=account_email, has_watermark=bool(watermark["text"] or watermark["logo"]))
 
+    # Multiple genres for the same product produce multiple 3-segment sets in one
+    # go (see build_rows' `genres` field) - label each with its genre so the
+    # gallery/downloads pages can tell them apart instead of showing "3 clips"
+    # with no way to know which style is which.
+    multi_genre = len({r.get("genre") for r in rows if r.get("genre")}) > 1
+
     results = []
     for row in rows:
         if row["id"] not in segment_ids:
             continue
+        row_variant = variant or (row.get("genre", "") if multi_genre else "")
         references = [row["reference_images"]] if row.get("reference_images") else []
         try:
             gfr.validate(row["model"], row["aspect_ratio"], row["resolution"],
@@ -769,7 +776,7 @@ def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[
             gfr.save_json(api_result, outputs_dir / "jobs" / f"{safe_name}.json")
             segment_label = {"a": "A - Hook", "b": "B - Feature", "c": "C - CTA"}.get(
                 row["id"].rsplit("_", 1)[-1], row["id"])
-            db.set_pending_job(jid, uid, category, segment_label, variant, watermark)
+            db.set_pending_job(jid, uid, category, segment_label, row_variant, watermark)
             db.log_event(uid, "job_submitted", job_id=jid, segment_id=row["id"], category=category)
             results.append({"segment_id": row["id"], "job_id": jid, "status": "submitted"})
         except Exception as exc:  # noqa: BLE001
@@ -804,7 +811,7 @@ def api_generate():
 
 BATCH_FIELDS = ["product_id", "product_name", "product_visual_desc", "presenter_desc",
                 "hook_line_1", "hook_line_2", "feature_tag_1", "feature_tag_2", "feature_tag_3",
-                "upgrade_hook_1", "upgrade_hook_2", "cta_text", "genre", "duration",
+                "upgrade_hook_1", "upgrade_hook_2", "cta_text", "genre", "genres", "duration",
                 "reference_image_filename"]
 
 BATCH_EXAMPLE_ROW = {
@@ -813,7 +820,7 @@ BATCH_EXAMPLE_ROW = {
     "presenter_desc": "", "hook_line_1": "เสียงไม่อิน?", "hook_line_2": "ไมค์ไม่มา?",
     "feature_tag_1": "เสียงชัด", "feature_tag_2": "ใส่สบาย", "feature_tag_3": "ไฟสวย",
     "upgrade_hook_1": "อัปเกรดชุดเกม", "upgrade_hook_2": "ให้ได้เปรียบกว่าเดิม",
-    "cta_text": "พิกัดตะกร้าด้านล่างเลย", "genre": "hook_feature_cta", "duration": "10",
+    "cta_text": "พิกัดตะกร้าด้านล่างเลย", "genre": "hook_feature_cta", "genres": "", "duration": "10",
     "reference_image_filename": "my_product_01.jpg",
 }
 
@@ -866,14 +873,21 @@ def api_batch_preview():
         return jsonify({"error": f"รองรับสูงสุด 30 สินค้าต่อรอบ (ไฟล์นี้มี {len(rows)})"}), 400
 
     products = []
+    total_segments = 0
     for row in rows:
         brief = _batch_row_to_brief(row, {})
+        try:
+            segment_count = len(bbf.build_rows(brief))
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"สินค้า {brief.get('product_id')}: {exc}"}), 400
+        total_segments += segment_count
         products.append({
             "product_id": brief["product_id"],
             "product_name": brief["product_name"],
+            "segment_count": segment_count,
             "has_reference_filename": bool((row.get("reference_image_filename") or "").strip()),
         })
-    return jsonify({"products": products, "total_segments": len(products) * 3})
+    return jsonify({"products": products, "total_segments": total_segments})
 
 
 @app.route("/api/batch_generate", methods=["POST"])
@@ -915,8 +929,8 @@ def api_batch_generate():
     all_results = []
     for row in rows:
         brief = _batch_row_to_brief(row, image_map)
-        segment_ids = {f"{brief['product_id']}_a", f"{brief['product_id']}_b", f"{brief['product_id']}_c"}
         try:
+            segment_ids = {r["id"] for r in bbf.build_rows(brief)}
             product_results = submit_brief_segments(uid, brief, segment_ids)
         except Exception as exc:  # noqa: BLE001
             product_results = [{"segment_id": brief["product_id"], "error": str(exc)}]

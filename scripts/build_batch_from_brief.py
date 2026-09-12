@@ -15,6 +15,13 @@ Genres (brief.csv column `genre`, default "hook_feature_cta"):
   asmr             - satisfying, mostly wordless product-handling ASMR
   pov              - first-person point-of-view, hands-only, "you" framing
   minimal          - clean minimalist aesthetic, negative space, no pop graphics
+
+Optional: brief.csv column `genres` (plural, comma-separated, e.g.
+"hook_feature_cta,asmr") generates a full 3-segment set for EACH listed
+genre from the same product/brief in one pass. Segment ids become
+<product_id>_<genre>_a/b/c to keep them distinct. Takes precedence over
+the singular `genre` column when both are present; leave it blank to keep
+the original single-genre behavior.
 """
 from __future__ import annotations
 import csv
@@ -23,7 +30,7 @@ from pathlib import Path
 
 BATCH_FIELDS = ["id", "status", "prompt", "model", "aspect_ratio", "resolution",
                 "duration", "count", "email", "start_image", "reference_images",
-                "job_id", "error"]
+                "job_id", "error", "genre"]
 
 DEFAULT_PRESENTER = ("a young Asian man with short black hair and thick "
                       "black-framed glasses, seated at a gaming desk setup")
@@ -206,11 +213,19 @@ def build_rows(brief_row: dict) -> list[dict]:
     resolution = csv_field(brief_row, "resolution", "720p")
     presenter = csv_field(brief_row, "presenter_desc", DEFAULT_PRESENTER)
 
-    genre = csv_field(brief_row, "genre", "hook_feature_cta").strip().lower()
-    if genre not in GENRES:
-        raise ValueError(
-            f"Unknown genre '{genre}'. Choose one of: {', '.join(GENRES)}")
-    template_a, template_b, template_c = GENRES[genre]
+    # `genres` (plural, comma-separated) is optional: pick multiple styles for the
+    # same product in one go, e.g. "hook_feature_cta,asmr". Falls back to the
+    # single `genre` field (unchanged default behavior) when not given.
+    genres_field = csv_field(brief_row, "genres")
+    if genres_field:
+        genre_list = [g.strip().lower() for g in genres_field.split(",") if g.strip()]
+    else:
+        genre_list = [csv_field(brief_row, "genre", "hook_feature_cta").strip().lower()]
+    for g in genre_list:
+        if g not in GENRES:
+            raise ValueError(
+                f"Unknown genre '{g}'. Choose one of: {', '.join(GENRES)}")
+    multi_genre = len(genre_list) > 1
 
     fmt_args = dict(
         duration=duration,
@@ -236,20 +251,23 @@ def build_rows(brief_row: dict) -> list[dict]:
         'keep on-screen text bold and legible but recolor/restyle it to match this brand style.'
         if visual_style else ''
     )
-    segments = [
-        (f"{product_id}_a", template_a.format(**fmt_args) + style_override),
-        (f"{product_id}_b", template_b.format(**fmt_args) + style_override),
-        (f"{product_id}_c", template_c.format(**fmt_args) + style_override),
-    ]
-
     rows = []
-    for seg_id, prompt in segments:
-        rows.append({
-            "id": seg_id, "status": "Ready", "prompt": prompt,
-            "model": model, "aspect_ratio": aspect_ratio, "resolution": resolution,
-            "duration": duration, "count": "1", "email": "", "start_image": "",
-            "reference_images": reference_image, "job_id": "", "error": "",
-        })
+    for genre in genre_list:
+        template_a, template_b, template_c = GENRES[genre]
+        prefix = f"{product_id}_{genre}" if multi_genre else product_id
+        segments = [
+            (f"{prefix}_a", template_a.format(**fmt_args) + style_override),
+            (f"{prefix}_b", template_b.format(**fmt_args) + style_override),
+            (f"{prefix}_c", template_c.format(**fmt_args) + style_override),
+        ]
+        for seg_id, prompt in segments:
+            rows.append({
+                "id": seg_id, "status": "Ready", "prompt": prompt,
+                "model": model, "aspect_ratio": aspect_ratio, "resolution": resolution,
+                "duration": duration, "count": "1", "email": "", "start_image": "",
+                "reference_images": reference_image, "job_id": "", "error": "",
+                "genre": genre,
+            })
     return rows
 
 
