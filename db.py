@@ -123,6 +123,17 @@ def init_db() -> None:
             created_at TEXT NOT NULL
         );
 
+        -- Latest known Flow credit balance per user. Previously this was
+        -- read live from cached job JSON files under userdata/<uid>/outputs/jobs/,
+        -- which lives on Render's ephemeral disk and disappears on every
+        -- deploy just like clip files did - hence the credits pill going
+        -- blank after a redeploy even though nothing was actually wrong.
+        CREATE TABLE IF NOT EXISTS flow_credits (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            credits INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         -- clips/activity_log have no user_id-leading key (clips/activity_log PK is
         -- just id; characters' PK leads with id not user_id) so every per-user
         -- listing query does a full table scan without these.
@@ -368,3 +379,24 @@ def pop_pending_job(job_id: str) -> dict | None:
         result = dict(row)
         result["watermark"] = json.loads(result.get("watermark") or "{}")
         return result
+
+
+# ---------------------------------------------------------------------------
+# Flow credit balance (persisted so a Render redeploy doesn't blank it out -
+# see flow_credits table comment in init_db)
+# ---------------------------------------------------------------------------
+
+def set_flow_credits(user_id: int, credits: int) -> None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO flow_credits (user_id, credits, updated_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (user_id) DO UPDATE SET credits = EXCLUDED.credits, updated_at = EXCLUDED.updated_at",
+            (user_id, credits, time.strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+
+
+def get_flow_credits(user_id: int) -> int | None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT credits FROM flow_credits WHERE user_id = %s", (user_id,))
+        row = cur.fetchone()
+        return row["credits"] if row else None

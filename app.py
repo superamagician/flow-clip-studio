@@ -181,7 +181,20 @@ def raw_get(user_id: int, url: str) -> dict | None:
         return None
 
 
+def record_flow_credits(user_id: int, api_result: dict) -> None:
+    """Persist the credit balance embedded in a useapi.net response, if any,
+    to the DB - so it survives a Render redeploy instead of only living in
+    the (ephemeral, wiped-on-deploy) cached job JSON files."""
+    credits = (api_result or {}).get("response", {}).get("remainingCredits")
+    if credits is not None:
+        db.set_flow_credits(user_id, credits)
+
+
 def latest_flow_credits(user_id: int) -> int | None:
+    stored = db.get_flow_credits(user_id)
+    if stored is not None:
+        return stored
+    # Fallback for rows created before flow_credits existed / local dev.
     best_time, best_credits = "", None
     for job_file in (user_dir(user_id) / "outputs" / "jobs").glob("*.json"):
         try:
@@ -748,6 +761,7 @@ def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[
                 row["resolution"], int(row["duration"]), int(row["count"]),
                 account_email, "", references, do_upload=True)
             api_result = client.submit(gfr_payload)
+            record_flow_credits(uid, api_result)
             jid = gfr.get_job_id(api_result)
             if not jid:
                 raise RuntimeError("Submission returned no job ID")
@@ -921,6 +935,7 @@ def api_job_status(job_id: str):
     outputs_dir = user_dir(uid) / "outputs"
     client = get_client(uid)
     result = client.job(job_id)
+    record_flow_credits(uid, result)
     status = str(result.get("status", "unknown")).lower()
     safe_name = gfr.safe_filename(job_id)
     gfr.save_json(result, outputs_dir / "jobs" / f"{safe_name}.json")
