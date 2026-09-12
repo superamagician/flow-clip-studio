@@ -8,6 +8,12 @@
 #   MASTER_KEY     - a Fernet key: generate locally with
 #                    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 #                    (reusing an existing .master.key's content keeps existing encrypted rows readable)
+#   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET - persistent video storage.
+#                    Render's own disk is wiped on every deploy, so generated clips are also
+#                    uploaded to a Supabase Storage bucket (Storage -> New bucket -> Public ON).
+#                    URL = your project URL, key = Settings -> API -> service_role secret (NOT anon).
+#                    Bucket name defaults to "clips" if SUPABASE_STORAGE_BUCKET isn't set. Optional -
+#                    if unset, the app still runs, it just loses clips again on the next deploy.
 services:
   - type: web
     name: flow-clip-studio
@@ -18,4 +24,10 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: MASTER_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
         sync: false

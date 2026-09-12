@@ -54,13 +54,13 @@
     }
     const rows = clips.map(c => `
       <tr data-id="${c.id}">
-        <td>${c.thumbnail ? `<img class="thumb" src="/outputs/${c.thumbnail}">` : ""}</td>
+        <td>${c.thumbnail_url ? `<img class="thumb" src="${c.thumbnail_url}">` : ""}</td>
         <td>${c.category || "-"}<br><span style="color:var(--muted)">${c.segment || ""}</span></td>
         <td>${c.width || "?"}×${c.height || "?"} · ${c.duration || "?"}s</td>
-        <td>${fmtBytes(c.size_bytes)}${!c.exists ? '<div class="missing">ไม่พบไฟล์จริง</div>' : ""}</td>
+        <td>${fmtBytes(c.size_bytes)}${!c.exists ? '<div class="missing">ไม่พบไฟล์จริง (เซิร์ฟเวอร์รีสตาร์ท)</div>' : ""}</td>
         <td>${(c.created_at || "").slice(0, 16)}</td>
         <td class="actions">
-          ${c.exists ? `<a class="btn btn-accent" href="/outputs/${c.file}" download>ดาวน์โหลด</a>` : ""}
+          ${c.exists ? `<a class="btn btn-accent" href="${c.url}" download>ดาวน์โหลด</a>` : ""}
           <button class="btn btn-danger" onclick="deleteClip(${c.id})">ลบ</button>
         </td>
       </tr>

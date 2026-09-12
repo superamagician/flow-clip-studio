@@ -51,6 +51,7 @@ def _load_dotenv(path: Path) -> None:
 _load_dotenv(ROOT / ".env")
 
 import db  # noqa: E402  (must come after _load_dotenv so DATABASE_URL/MASTER_KEY are set)
+import storage  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_batch_from_brief as bbf  # noqa: E402
@@ -252,6 +253,35 @@ def apply_watermark(input_path: Path, watermark: dict) -> None:
     tmp_path.replace(input_path)
 
 
+def upload_clip_to_storage(uid: int, video_path: Path, thumb_path: Path | None) -> dict:
+    """Best-effort upload of a finished clip + thumbnail to Supabase Storage so
+    it survives the next Render redeploy (local disk is wiped every deploy).
+    Returns {} when Storage isn't configured, or on upload failure - the local
+    /outputs/ copy still serves fine for this container's lifetime either way."""
+    if not storage.enabled():
+        return {}
+    result = {}
+    try:
+        result["storage_url"] = storage.upload(video_path, f"{uid}/{video_path.name}")
+        if thumb_path and thumb_path.exists():
+            result["thumbnail_storage_url"] = storage.upload(thumb_path, f"{uid}/thumbnails/{thumb_path.name}")
+    except Exception as exc:  # noqa: BLE001
+        db.log_event(uid, "storage_upload_failed", file=video_path.name, error=str(exc))
+    return result
+
+
+def clip_view(clip: dict, outputs_dir: Path) -> dict:
+    """Add ready-to-use url/thumbnail_url/exists fields to a clip row - prefers
+    the persistent Storage URL (survives redeploys) and falls back to the
+    local /outputs/ copy (only guaranteed for this container's lifetime)."""
+    local_exists = (outputs_dir / clip["file"]).exists()
+    url = clip.get("storage_url") or (f"/outputs/{clip['file']}" if local_exists else None)
+    thumb = clip.get("thumbnail")
+    thumb_url = clip.get("thumbnail_storage_url") or (
+        f"/outputs/{thumb}" if thumb and (outputs_dir / thumb).exists() else None)
+    return {**clip, "url": url, "thumbnail_url": thumb_url, "exists": bool(url)}
+
+
 def slugify(name: str) -> str:
     ascii_only = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
     return ascii_only or "product"
@@ -425,7 +455,7 @@ def api_downloads():
         path = outputs_dir / clip["file"]
         size = path.stat().st_size if path.exists() else 0
         total_bytes += size
-        result.append({**clip, "size_bytes": size, "exists": path.exists()})
+        result.append({**clip_view(clip, outputs_dir), "size_bytes": size})
     return jsonify({"clips": result, "total_bytes": total_bytes})
 
 
@@ -833,17 +863,22 @@ def api_job_status(job_id: str):
 
                 info = ffprobe_info(video_path)
                 thumb_name = video_path.stem + ".jpg"
+                thumb_path = outputs_dir / "thumbnails" / thumb_name
                 try:
-                    make_thumbnail(video_path, outputs_dir / "thumbnails" / thumb_name)
+                    make_thumbnail(video_path, thumb_path)
                 except subprocess.CalledProcessError:
                     thumb_name = None
+                storage_urls = upload_clip_to_storage(
+                    uid, video_path, thumb_path if thumb_name else None)
                 db.add_clip(uid, {
                     "file": fname, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
                     "category": meta["category"], "segment": meta["segment"],
-                    "variant": meta["variant"], **info,
+                    "variant": meta["variant"], **info, **storage_urls,
                 })
                 db.log_event(uid, "job_completed", job_id=job_id, category=meta["category"],
                              segment=meta["segment"], file=fname, duration=info["duration"])
+                if storage_urls.get("storage_url"):
+                    file_url = storage_urls["storage_url"]
     elif status == "failed":
         db.log_event(uid, "job_failed", job_id=job_id)
 
@@ -886,19 +921,22 @@ def api_concatenate():
 
     info = ffprobe_info(out_path)
     thumb_name = out_path.stem + ".jpg"
+    thumb_path = outputs_dir / "thumbnails" / thumb_name
     try:
-        make_thumbnail(out_path, outputs_dir / "thumbnails" / thumb_name)
+        make_thumbnail(out_path, thumb_path)
     except subprocess.CalledProcessError:
         thumb_name = None
 
+    storage_urls = upload_clip_to_storage(uid, out_path, thumb_path if thumb_name else None)
     db.add_clip(uid, {
         "file": out_name, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
         "category": category, "segment": f"คลิปรวม {round(info['duration'])} วินาที",
-        "variant": "", **info,
+        "variant": "", **info, **storage_urls,
     })
     db.log_event(uid, "concatenate", category=category, files=filenames, output=out_name, duration=info["duration"])
 
-    return jsonify({"file_url": f"/outputs/{out_name}", **info})
+    file_url = storage_urls.get("storage_url") or f"/outputs/{out_name}"
+    return jsonify({"file_url": file_url, **info})
 
 
 # ---------------------------------------------------------------------------
@@ -934,7 +972,9 @@ def api_account_status():
 @app.route("/api/manifest")
 @login_required
 def api_manifest():
-    return jsonify(db.list_clips(current_user_id()))
+    uid = current_user_id()
+    outputs_dir = user_dir(uid) / "outputs"
+    return jsonify([clip_view(c, outputs_dir) for c in db.list_clips(uid)])
 
 
 @app.route("/api/log")

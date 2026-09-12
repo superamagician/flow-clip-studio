@@ -72,8 +72,15 @@
           card.className = "card";
           const video = document.createElement("video");
           video.controls = true; video.preload = "none";
-          if (clip.thumbnail) video.poster = "/outputs/" + clip.thumbnail;
-          video.src = "/outputs/" + clip.file;
+          if (clip.thumbnail_url || clip.thumbnail) video.poster = clip.thumbnail_url || ("/outputs/" + clip.thumbnail);
+          video.src = clip.url || ("/outputs/" + clip.file);
+          video.addEventListener("error", () => {
+            const missing = document.createElement("div");
+            missing.style.cssText = "aspect-ratio:9/16;background:var(--bg-alt);display:flex;align-items:center;" +
+              "justify-content:center;text-align:center;color:var(--muted);font-size:12px;padding:10px";
+            missing.textContent = "ไฟล์นี้หายไป (เซิร์ฟเวอร์รีสตาร์ท) — สร้างใหม่ได้ที่หน้าสร้างคลิป";
+            video.replaceWith(missing);
+          }, { once: true });
           card.appendChild(video);
           const meta = document.createElement("div");
           meta.className = "meta";

@@ -100,8 +100,12 @@ def init_db() -> None:
             thumbnail TEXT,
             category TEXT, segment TEXT, variant TEXT,
             duration REAL, width INTEGER, height INTEGER,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            storage_url TEXT,
+            thumbnail_storage_url TEXT
         );
+        ALTER TABLE clips ADD COLUMN IF NOT EXISTS storage_url TEXT;
+        ALTER TABLE clips ADD COLUMN IF NOT EXISTS thumbnail_storage_url TEXT;
 
         CREATE TABLE IF NOT EXISTS activity_log (
             id SERIAL PRIMARY KEY,
@@ -216,10 +220,12 @@ def add_clip(user_id: int, clip: dict) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO clips (user_id, file, thumbnail, category, segment, variant, "
-            "duration, width, height, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "duration, width, height, created_at, storage_url, thumbnail_storage_url) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (user_id, clip["file"], clip.get("thumbnail"), clip.get("category"),
              clip.get("segment"), clip.get("variant"), clip.get("duration"),
-             clip.get("width"), clip.get("height"), time.strftime("%Y-%m-%d %H:%M:%S")))
+             clip.get("width"), clip.get("height"), time.strftime("%Y-%m-%d %H:%M:%S"),
+             clip.get("storage_url"), clip.get("thumbnail_storage_url")))
         conn.commit()
 
 
