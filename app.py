@@ -53,6 +53,7 @@ _load_dotenv(ROOT / ".env")
 
 import db  # noqa: E402  (must come after _load_dotenv so DATABASE_URL/MASTER_KEY are set)
 import storage  # noqa: E402
+import ai_copywriter  # noqa: E402
 
 sys.path.insert(0, str(ROOT / "scripts"))
 import build_batch_from_brief as bbf  # noqa: E402
@@ -355,7 +356,12 @@ def slugify(name: str) -> str:
     return ascii_only or "product"
 
 
-def autofill(brief: dict) -> dict:
+AI_COPY_FIELDS = ["hook_line_1", "hook_line_2", "feature_tag_1", "feature_tag_2",
+                   "feature_tag_3", "upgrade_hook_1", "upgrade_hook_2", "cta_text"]
+AI_FILL_FIELDS = AI_COPY_FIELDS + ["presenter_desc"]
+
+
+def autofill(brief: dict, uid: int | None = None) -> dict:
     brief = dict(brief)
     name = (brief.get("product_name") or "").strip() or "สินค้านี้"
     if not brief.get("product_id"):
@@ -364,9 +370,34 @@ def autofill(brief: dict) -> dict:
         brief["product_visual_desc"] = (
             f'the product exactly as shown in the attached reference photo (a product called '
             f'"{name}"), matching its real colors, materials, shape, and label/logo design precisely')
+
+    # Reuse a previous autofill() result for this exact product_id first (e.g. the
+    # user's own earlier preview of the same not-yet-generated product) so the copy
+    # the customer approved in preview is exactly what ends up in the actual
+    # generation - without this, calling the AI again at generate time would very
+    # likely produce different text than what was just shown.
+    if uid and any(not brief.get(f) for f in AI_FILL_FIELDS):
+        cached = db.get_brief(uid, brief["product_id"])
+        if cached:
+            for field in AI_FILL_FIELDS:
+                if not brief.get(field) and cached.get(field):
+                    brief[field] = cached[field]
+
+    needs_ai_copy = any(not brief.get(f) for f in AI_FILL_FIELDS)
+    ai_copy = ai_copywriter.generate_copy(name, brief.get("product_visual_desc", "")) \
+        if needs_ai_copy and ai_copywriter.enabled() else None
+
     if not brief.get("presenter_desc"):
+        scene = ai_copy["scene_setting_desc"] if ai_copy else "a bright clean modern room"
         brief["presenter_desc"] = ("a friendly, good-looking young Asian presenter with a warm "
-                                    "genuine smile, in a bright clean modern room")
+                                    f"genuine smile, in {scene}")
+
+    for field in AI_COPY_FIELDS:
+        if not brief.get(field) and ai_copy:
+            brief[field] = ai_copy[field]
+
+    # Static fallback - always applied last, so a disabled/failed AI call (or one
+    # that only returned some fields) never leaves anything blank.
     if not brief.get("hook_line_1"):
         brief["hook_line_1"] = f"ยังไม่มี {name}?"
     if not brief.get("hook_line_2"):
@@ -383,6 +414,9 @@ def autofill(brief: dict) -> dict:
         brief["upgrade_hook_2"] = "ให้ชีวิตดีขึ้น"
     if not brief.get("cta_text"):
         brief["cta_text"] = "พิกัดตะกร้าด้านล่างเลย"
+
+    if uid and ai_copy:
+        db.save_brief(uid, brief["product_id"], name, brief)
     return brief
 
 
@@ -704,7 +738,7 @@ def api_reports():
 @login_required
 def api_preview():
     uid = current_user_id()
-    brief = autofill(request.get_json(force=True))
+    brief = autofill(request.get_json(force=True), uid)
     try:
         rows = bbf.build_rows(brief)
     except Exception as exc:  # noqa: BLE001
@@ -720,11 +754,12 @@ def api_preview():
 @app.route("/api/captions", methods=["POST"])
 @login_required
 def api_captions():
+    uid = current_user_id()
     payload = request.get_json(force=True)
-    brief = autofill(payload.get("brief") or {})
+    brief = autofill(payload.get("brief") or {}, uid)
     platforms = payload.get("platforms") or ["tiktok", "facebook", "shopee"]
     result = caption_writer.generate(brief, platforms)
-    db.log_event(current_user_id(), "captions_generated", category=brief.get("product_name"), platforms=platforms)
+    db.log_event(uid, "captions_generated", category=brief.get("product_name"), platforms=platforms)
     return jsonify(result)
 
 
@@ -858,7 +893,7 @@ def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[
 def api_generate():
     uid = current_user_id()
     payload = request.get_json(force=True)
-    brief = autofill(payload.get("brief") or {})
+    brief = autofill(payload.get("brief") or {}, uid)
     segment_ids = set(payload.get("segment_ids") or [])
 
     client = get_client(uid)
@@ -899,12 +934,12 @@ def _read_batch_csv(file_storage) -> list[dict]:
     return list(reader)
 
 
-def _batch_row_to_brief(row: dict, image_map: dict[str, str]) -> dict:
+def _batch_row_to_brief(row: dict, image_map: dict[str, str], uid: int | None = None) -> dict:
     brief = {k: (row.get(k) or "").strip() for k in BATCH_FIELDS if k != "reference_image_filename"}
     ref_name = (row.get("reference_image_filename") or "").strip()
     if ref_name and ref_name in image_map:
         brief["reference_image"] = image_map[ref_name]
-    return autofill(brief)
+    return autofill(brief, uid)
 
 
 @app.route("/batch")
@@ -928,6 +963,7 @@ def api_batch_template():
 @app.route("/api/batch_preview", methods=["POST"])
 @login_required
 def api_batch_preview():
+    uid = current_user_id()
     file = request.files.get("csv")
     if not file:
         return jsonify({"error": "ไม่พบไฟล์ CSV"}), 400
@@ -943,7 +979,7 @@ def api_batch_preview():
     products = []
     total_segments = 0
     for row in rows:
-        brief = _batch_row_to_brief(row, {})
+        brief = _batch_row_to_brief(row, {}, uid)
         try:
             segment_count = len(bbf.build_rows(brief))
         except Exception as exc:  # noqa: BLE001
@@ -996,7 +1032,7 @@ def api_batch_generate():
 
     all_results = []
     for row in rows:
-        brief = _batch_row_to_brief(row, image_map)
+        brief = _batch_row_to_brief(row, image_map, uid)
         try:
             segment_ids = {r["id"] for r in bbf.build_rows(brief)}
             product_results = submit_brief_segments(uid, brief, segment_ids)

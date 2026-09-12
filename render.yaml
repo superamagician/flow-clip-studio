@@ -19,6 +19,9 @@
 #                    disable (keeps every clip forever - Storage/DB usage then only grows).
 #   ADMIN_USERNAMES  - comma-separated usernames allowed to view /admin (platform-wide
 #                    stats across all customers). Empty by default (nobody can access it).
+#   ANTHROPIC_API_KEY - product-specific ad copy (hook/feature/CTA/scene) via Claude Haiku
+#                    instead of generic static filler when a customer leaves those fields
+#                    blank. Optional - if unset, autofill just uses the old static phrases.
 services:
   - type: web
     name: flow-clip-studio
@@ -39,4 +42,6 @@ services:
       - key: CLIP_RETENTION_DAYS
         sync: false
       - key: ADMIN_USERNAMES
+        sync: false
+      - key: ANTHROPIC_API_KEY
         sync: false
