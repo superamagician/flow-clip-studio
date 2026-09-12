@@ -25,6 +25,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from flask import (Flask, jsonify, request, render_template, send_from_directory,
@@ -446,6 +447,27 @@ def api_delete_clip(clip_id: int):
     return jsonify({"ok": True})
 
 
+def _job_generation_seconds(logs: list[dict]) -> list[float]:
+    """Pair job_submitted -> job_completed log entries by job_id to get real
+    wall-clock generation time per clip (logs come back newest-first)."""
+    submitted_at: dict[str, str] = {}
+    seconds = []
+    for entry in reversed(logs):
+        jid = entry.get("job_id")
+        if not jid:
+            continue
+        if entry["action"] == "job_submitted":
+            submitted_at[jid] = entry["ts"]
+        elif entry["action"] == "job_completed":
+            start = submitted_at.pop(jid, None)
+            if start:
+                delta = (datetime.strptime(entry["ts"], "%Y-%m-%d %H:%M:%S") -
+                          datetime.strptime(start, "%Y-%m-%d %H:%M:%S")).total_seconds()
+                if delta > 0:
+                    seconds.append(delta)
+    return seconds
+
+
 @app.route("/api/reports")
 @login_required
 def api_reports():
@@ -476,6 +498,9 @@ def api_reports():
     completed = action_counts.get("job_completed", 0)
     failed = action_counts.get("job_failed", 0) + action_counts.get("job_submit_failed", 0)
 
+    gen_seconds = _job_generation_seconds(logs)
+    avg_gen_seconds = round(sum(gen_seconds) / len(gen_seconds), 1) if gen_seconds else None
+
     return jsonify({
         "total_clips": len(clips),
         "total_duration": round(total_duration, 1),
@@ -486,6 +511,7 @@ def api_reports():
         "jobs_completed": completed,
         "jobs_failed": failed,
         "success_rate": round(completed / submitted * 100, 1) if submitted else None,
+        "avg_generation_seconds": avg_gen_seconds,
         "flow_remaining_credits": latest_flow_credits(uid),
     })
 

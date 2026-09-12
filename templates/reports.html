@@ -37,8 +37,16 @@
     const res = await fetch("/api/reports");
     const data = await res.json();
 
+    function formatDuration(seconds) {
+      if (seconds == null) return "-";
+      const m = Math.floor(seconds / 60), s = Math.round(seconds % 60);
+      return m > 0 ? `${m} นาที ${s} วิ` : `${s} วิ`;
+    }
+
     const cards = [
+      { label: "เครดิตคงเหลือ", value: data.flow_remaining_credits != null ? data.flow_remaining_credits.toLocaleString() : "-" },
       { label: "คลิปทั้งหมด", value: data.total_clips },
+      { label: "เวลาเฉลี่ยต่อคลิป", value: formatDuration(data.avg_generation_seconds) },
       { label: "ความยาวรวม", value: Math.round(data.total_duration) + "s" },
       { label: "งานที่ส่ง", value: data.jobs_submitted },
       { label: "สำเร็จ", value: data.jobs_completed, cls: "ok" },
