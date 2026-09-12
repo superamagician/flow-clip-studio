@@ -50,7 +50,6 @@ _load_dotenv(ROOT / ".env")
 import db  # noqa: E402  (must come after _load_dotenv so DATABASE_URL/MASTER_KEY are set)
 
 sys.path.insert(0, str(ROOT / "scripts"))
-sys.path.insert(0, str(Path.home() / ".claude" / "skills" / "google-flow-rest" / "scripts"))
 import build_batch_from_brief as bbf  # noqa: E402
 import caption_writer  # noqa: E402
 import google_flow_rest as gfr  # noqa: E402
