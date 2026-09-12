@@ -56,6 +56,9 @@
       <div class="sub" style="margin-top:4px">⚠️ ใช้รูปสินค้าล้วนๆ พื้นหลังเรียบ — <b>ห้ามใช้รูปที่มีแบนเนอร์โลโก้/ตรา "No.1"/แถบไอคอนฟีเจอร์/ป้ายลดราคาปนอยู่</b>
       (รูปจากหน้า listing บน Shopee/Lazada มักมีกราฟิกพวกนี้ติดมาด้วย) ถ้ามีต้องครอปออกก่อน ไม่งั้น AI จะสับสนและวาดสินค้าไม่ตรงปก</div>
 
+      <label>ลิงก์สินค้า <span class="req">*</span> (Shopee/TikTok Shop/Lazada — ใช้ปักตะกร้า/ใส่แคปชั่นอัตโนมัติ)</label>
+      <input type="text" name="product_link" id="productLinkInput" required placeholder="เช่น https://shopee.co.th/product/...">
+
       <div class="row2">
         <div>
           <label>แนวคลิป (genre) — เลือกได้มากกว่า 1 แนว (ไม่บังคับ)</label>
@@ -84,8 +87,6 @@
         <legend>รายละเอียดสินค้า &amp; พรีเซนเตอร์</legend>
         <label>Product ID (ภาษาอังกฤษ ไม่มีเว้นวรรค — ปล่อยว่างได้)</label>
         <input type="text" name="product_id" placeholder="ระบบจะตั้งให้อัตโนมัติจากชื่อสินค้า">
-        <label>ลิงก์สินค้า (Shopee/TikTok Shop/Lazada — สำหรับปักตะกร้า ใส่ไว้แคปชั่นจะแนบให้อัตโนมัติ)</label>
-        <input type="text" name="product_link" placeholder="เช่น https://shopee.co.th/product/...">
         <label>คำอธิบายรูปลักษณ์สินค้า (ภาษาอังกฤษ — ปล่อยว่างได้)</label>
         <textarea name="product_visual_desc"></textarea>
         <label>เลือกตัวละคร (พรีเซนเตอร์จากคลัง — ไม่บังคับ)</label>
@@ -352,6 +353,7 @@ document.getElementById("createBtn").addEventListener("click", async () => {
   const nameEl = document.querySelector('[name="product_name"]');
   if (!nameEl.value.trim()) { alert("กรอกชื่อสินค้าก่อน"); return; }
   if (!refPath) { alert("อัปโหลดรูปสินค้าก่อน"); return; }
+  if (!document.getElementById("productLinkInput").value.trim()) { alert("ใส่ลิงก์สินค้าก่อน (ห้ามลืม — ใช้ปักตะกร้า/แนบแคปชั่น)"); return; }
   if (!document.querySelectorAll(".genreCheck:checked").length) { alert("เลือกแนวคลิปอย่างน้อย 1 แนว"); return; }
 
   const btn = document.getElementById("createBtn");

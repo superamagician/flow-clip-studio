@@ -803,6 +803,8 @@ def api_reports():
 def api_preview():
     uid = current_user_id()
     brief = autofill(request.get_json(force=True), uid)
+    if not (brief.get("product_link") or "").strip():
+        return jsonify({"error": "ใส่ลิงก์สินค้าก่อน (ห้ามลืม — ใช้ปักตะกร้า/แนบแคปชั่น)"}), 400
     try:
         rows = bbf.build_rows(brief)
     except Exception as exc:  # noqa: BLE001
@@ -959,6 +961,8 @@ def api_generate():
     uid = current_user_id()
     payload = request.get_json(force=True)
     brief = autofill(payload.get("brief") or {}, uid)
+    if not (brief.get("product_link") or "").strip():
+        return jsonify({"error": "ใส่ลิงก์สินค้าก่อน (ห้ามลืม — ใช้ปักตะกร้า/แนบแคปชั่น)"}), 400
     segment_ids = set(payload.get("segment_ids") or [])
 
     client = get_client(uid)
@@ -1042,6 +1046,10 @@ def api_batch_preview():
     if len(rows) > 30:
         return jsonify({"error": f"รองรับสูงสุด 30 สินค้าต่อรอบ (ไฟล์นี้มี {len(rows)})"}), 400
 
+    missing_link = [str(i + 1) for i, row in enumerate(rows) if not (row.get("product_link") or "").strip()]
+    if missing_link:
+        return jsonify({"error": f"แถวที่ {', '.join(missing_link)} ยังไม่มี product_link (ห้ามลืม — ใช้ปักตะกร้า/แนบแคปชั่น)"}), 400
+
     products = []
     total_segments = 0
     for row in rows:
@@ -1077,6 +1085,10 @@ def api_batch_generate():
         return jsonify({"error": f"อ่านไฟล์ CSV ไม่ได้: {exc}"}), 400
     if len(rows) > 30:
         return jsonify({"error": f"รองรับสูงสุด 30 สินค้าต่อรอบ (ไฟล์นี้มี {len(rows)})"}), 400
+
+    missing_link = [str(i + 1) for i, row in enumerate(rows) if not (row.get("product_link") or "").strip()]
+    if missing_link:
+        return jsonify({"error": f"แถวที่ {', '.join(missing_link)} ยังไม่มี product_link (ห้ามลืม — ใช้ปักตะกร้า/แนบแคปชั่น)"}), 400
 
     # Validate all image formats up front - reject the whole batch before submitting
     # anything if any file is unsupported, rather than failing mid-way per product.
