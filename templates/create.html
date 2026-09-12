@@ -463,21 +463,6 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
       card.querySelector(".retryBtn").addEventListener("click", (e) => retrySegment(r.segment_id, r.product_id, card, e.target));
       return;
     }
-    if (r.status === "queued_chain") {
-      // Waits for the previous segment in its chain to actually finish (see
-      // /api/status/<job_id>'s next_job_id hand-off) so it can start from that
-      // segment's real last frame instead of an independently imagined scene.
-      card.id = "chainwait-" + r.segment_id;
-      card.dataset.slot = slot;
-      card.innerHTML = `
-        <div style="flex:1">
-          <div><b>${r.segment_id}</b></div>
-          <div class="status-pending">รอต่อจาก segment ก่อนหน้า...</div>
-        </div>
-      `;
-      jobCards.appendChild(card);
-      return;
-    }
     card.id = "job-" + r.job_id;
     card.innerHTML = `
       <div style="flex:1">
@@ -532,20 +517,7 @@ async function pollJob(jobId, slot, tracker, segmentId, productId) {
         tracker.files[slot] = data.file_url;
         tracker.doneCount++;
       }
-      if (data.next_job_id && data.next_segment_id) {
-        const waitingCard = document.getElementById("chainwait-" + data.next_segment_id);
-        if (waitingCard) {
-          const nextSlot = waitingCard.dataset.slot !== undefined ? parseInt(waitingCard.dataset.slot, 10) : null;
-          waitingCard.id = "job-" + data.next_job_id;
-          waitingCard.innerHTML = `
-            <div style="flex:1">
-              <div><b>${data.next_segment_id}</b></div>
-              <div class="status-pending" id="status-${data.next_job_id}">กำลังสร้างต่อเนื่องจาก segment ก่อนหน้า...</div>
-            </div>
-          `;
-          pollJob(data.next_job_id, nextSlot, tracker, data.next_segment_id, productId);
-        }
-      } else if (tracker && tracker.doneCount === tracker.expected) {
+      if (tracker && tracker.doneCount === tracker.expected) {
         checkAutoConcat(tracker);
       }
       return;
