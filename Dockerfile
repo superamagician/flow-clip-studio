@@ -17,4 +17,4 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Runs the schema migration (idempotent CREATE TABLE IF NOT EXISTS) then starts gunicorn.
-CMD ["sh", "-c", "python -c 'import db; db.init_db()' && gunicorn -b 0.0.0.0:$PORT -w 2 --timeout 120 app:app"]
+CMD ["sh", "-c", "python -c 'import db; db.init_db()' && gunicorn -b 0.0.0.0:$PORT -w 2 --timeout 240 app:app"]

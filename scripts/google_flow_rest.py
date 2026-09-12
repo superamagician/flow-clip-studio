@@ -28,6 +28,7 @@ def load_env(path: Path) -> None:
 class Client:
     def __init__(self, token: str):
         self.token = token
+        self._upload_cache: dict[str, str] = {}
 
     def request(self, method: str, path: str, body=None, content_type="application/json"):
         if not self.token:
@@ -57,6 +58,10 @@ class Client:
 
     def upload(self, file_path: Path, email="") -> str:
         path = file_path.expanduser().resolve()
+        cache_key = f"{email}:{path}"
+        cached = self._upload_cache.get(cache_key)
+        if cached:
+            return cached
         if not path.is_file():
             raise ValueError(f"Reference not found: {path}")
         # Use an explicit extension->mime map rather than mimetypes.guess_type(),
@@ -74,7 +79,16 @@ class Client:
             asset = asset.get("mediaGenerationId")
         if not asset:
             raise RuntimeError("Upload returned no mediaGenerationId")
-        return str(asset)
+        asset = str(asset)
+        # Same product reference image gets reused across every segment of a
+        # brief (and every genre, when multiple are requested) - caching here
+        # turns N redundant uploads of identical bytes into 1 per (file, email),
+        # which matters a lot for request latency: each upload is a real
+        # network round-trip, and multi-genre submits used to serialize N of
+        # them inside a single Flask request, risking the gunicorn worker
+        # timeout on Render's slower CPU.
+        self._upload_cache[cache_key] = asset
+        return asset
 
     def submit(self, payload):
         return self.request("POST", "/videos", payload)
