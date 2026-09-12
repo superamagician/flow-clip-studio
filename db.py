@@ -13,6 +13,7 @@ import json
 import os
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import psycopg2
@@ -121,6 +122,13 @@ def init_db() -> None:
             category TEXT, segment TEXT, variant TEXT, watermark TEXT,
             created_at TEXT NOT NULL
         );
+
+        -- clips/activity_log have no user_id-leading key (clips/activity_log PK is
+        -- just id; characters' PK leads with id not user_id) so every per-user
+        -- listing query does a full table scan without these.
+        CREATE INDEX IF NOT EXISTS idx_clips_user_id ON clips (user_id);
+        CREATE INDEX IF NOT EXISTS idx_activity_log_user_id ON activity_log (user_id);
+        CREATE INDEX IF NOT EXISTS idx_characters_user_id ON characters (user_id);
         """)
         conn.commit()
 
@@ -254,6 +262,13 @@ def list_clips(user_id: int) -> list[dict]:
         return [dict(r) for r in cur.fetchall()]
 
 
+def list_stale_clips(cutoff_ts: str) -> list[dict]:
+    """All clips (any user) older than cutoff_ts - for the retention cleanup job."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM clips WHERE created_at < %s", (cutoff_ts,))
+        return [dict(r) for r in cur.fetchall()]
+
+
 # ---------------------------------------------------------------------------
 # Activity log
 # ---------------------------------------------------------------------------
@@ -265,6 +280,51 @@ def log_event(user_id: int, action: str, **details) -> None:
             (user_id, time.strftime("%Y-%m-%d %H:%M:%S"), action,
              json.dumps(details, ensure_ascii=False)))
         conn.commit()
+
+
+def admin_overview(days: int = 30) -> dict:
+    """Platform-wide counts for the admin monitoring page - deliberately
+    cheap (no byte-size accounting; check the Supabase dashboard directly
+    for exact Storage/DB usage against plan quotas)."""
+    since = (datetime_now_minus_days(days))
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS n FROM users")
+        total_users = cur.fetchone()["n"]
+
+        cur.execute("SELECT COUNT(*) AS n FROM clips")
+        total_clips = cur.fetchone()["n"]
+
+        cur.execute(
+            "SELECT action, COUNT(*) AS n FROM activity_log "
+            "WHERE ts > %s AND action IN "
+            "('job_submitted', 'job_completed', 'job_failed', 'job_submit_failed', 'clip_auto_deleted') "
+            "GROUP BY action", (since,))
+        action_counts = {r["action"]: r["n"] for r in cur.fetchall()}
+
+        cur.execute(
+            "SELECT a.ts, a.action, a.details, u.username FROM activity_log a "
+            "JOIN users u ON u.id = a.user_id "
+            "WHERE a.action IN ('job_failed', 'job_submit_failed', 'storage_upload_failed') "
+            "ORDER BY a.id DESC LIMIT 25")
+        recent_failures = [
+            {"ts": r["ts"], "action": r["action"], "username": r["username"],
+             **json.loads(r["details"] or "{}")}
+            for r in cur.fetchall()]
+
+    return {
+        "total_users": total_users,
+        "total_clips": total_clips,
+        "window_days": days,
+        "jobs_submitted": action_counts.get("job_submitted", 0),
+        "jobs_completed": action_counts.get("job_completed", 0),
+        "jobs_failed": action_counts.get("job_failed", 0) + action_counts.get("job_submit_failed", 0),
+        "clips_auto_deleted": action_counts.get("clip_auto_deleted", 0),
+        "recent_failures": recent_failures,
+    }
+
+
+def datetime_now_minus_days(days: int) -> str:
+    return (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def list_log(user_id: int, limit: int = 200) -> list[dict]:

@@ -126,6 +126,9 @@
     <div class="nav-item {% if active == 'reports' %}active{% endif %}"><a href="/reports">📊 รายงานผลงาน</a></div>
     <div class="nav-item {% if active == 'log' %}active{% endif %}"><a href="/log">📜 ประวัติการทำงาน</a></div>
     <div class="nav-item {% if active == 'guide' %}active{% endif %}"><a href="/guide">📘 คู่มือการใช้งาน</a></div>
+    {% if is_admin %}
+    <div class="nav-item {% if active == 'admin' %}active{% endif %}"><a href="/admin">🛠 Admin Overview</a></div>
+    {% endif %}
 
     <div class="nav-section">บัญชี: {{ session.username }}</div>
     <div class="nav-item {% if active == 'settings' %}active{% endif %}"><a href="/settings">⚙️ ตั้งค่า API</a></div>

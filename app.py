@@ -25,7 +25,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import (Flask, jsonify, request, render_template, send_from_directory,
@@ -282,6 +282,60 @@ def clip_view(clip: dict, outputs_dir: Path) -> dict:
     return {**clip, "url": url, "thumbnail_url": thumb_url, "exists": bool(url)}
 
 
+# ---------------------------------------------------------------------------
+# Clip retention (Storage/DB usage grows forever otherwise - see Supabase
+# free/Pro plan capacity planning: a 30-day rolling window keeps footprint
+# roughly constant instead of accumulating every clip ever generated).
+# ---------------------------------------------------------------------------
+
+CLIP_RETENTION_DAYS = int(os.getenv("CLIP_RETENTION_DAYS", "30") or 0)
+
+
+def cleanup_old_clips() -> int:
+    """Delete clips older than CLIP_RETENTION_DAYS from local disk, Supabase
+    Storage, and the DB. Returns how many were deleted. No-op if
+    CLIP_RETENTION_DAYS <= 0 (retention disabled)."""
+    if CLIP_RETENTION_DAYS <= 0:
+        return 0
+    cutoff = (datetime.now() - timedelta(days=CLIP_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    deleted = 0
+    for clip in db.list_stale_clips(cutoff):
+        uid = clip["user_id"]
+        outputs_dir = user_dir(uid) / "outputs"
+        for rel in (clip["file"], clip.get("thumbnail")):
+            if rel:
+                try:
+                    (outputs_dir / rel).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        if clip.get("storage_url"):
+            try:
+                storage.delete(f"{uid}/{clip['file']}")
+            except Exception:  # noqa: BLE001
+                pass
+        if clip.get("thumbnail_storage_url") and clip.get("thumbnail"):
+            try:
+                storage.delete(f"{uid}/{clip['thumbnail']}")
+            except Exception:  # noqa: BLE001
+                pass
+        db.delete_clip(uid, clip["id"])
+        db.log_event(uid, "clip_auto_deleted", file=clip["file"], retention_days=CLIP_RETENTION_DAYS)
+        deleted += 1
+    return deleted
+
+
+def _retention_loop() -> None:
+    while True:
+        time.sleep(6 * 3600)
+        try:
+            cleanup_old_clips()
+        except Exception:  # noqa: BLE001
+            pass  # next tick tries again - a missed cleanup pass isn't urgent
+
+
+threading.Thread(target=_retention_loop, daemon=True).start()
+
+
 def slugify(name: str) -> str:
     ascii_only = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
     return ascii_only or "product"
@@ -431,6 +485,38 @@ def downloads_page():
     return render_template("downloads.html", active="downloads")
 
 
+ADMIN_USERNAMES = {u.strip() for u in os.getenv("ADMIN_USERNAMES", "").split(",") if u.strip()}
+
+
+@app.context_processor
+def inject_is_admin():
+    return {"is_admin": session.get("username") in ADMIN_USERNAMES}
+
+
+def admin_required(view):
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        user = db.get_user(current_user_id())
+        if not user or user["username"] not in ADMIN_USERNAMES:
+            return jsonify({"error": "ไม่มีสิทธิ์เข้าถึงหน้านี้"}), 403
+        return view(*args, **kwargs)
+    return wrapped
+
+
+@app.route("/admin")
+@login_required
+@admin_required
+def admin_page():
+    return render_template("admin.html", active="admin")
+
+
+@app.route("/api/admin/overview")
+@login_required
+@admin_required
+def api_admin_overview():
+    return jsonify(db.admin_overview())
+
+
 @app.route("/reports")
 @login_required
 def reports_page():
@@ -456,7 +542,8 @@ def api_downloads():
         size = path.stat().st_size if path.exists() else 0
         total_bytes += size
         result.append({**clip_view(clip, outputs_dir), "size_bytes": size})
-    return jsonify({"clips": result, "total_bytes": total_bytes})
+    return jsonify({"clips": result, "total_bytes": total_bytes,
+                     "retention_days": CLIP_RETENTION_DAYS})
 
 
 @app.route("/api/downloads/<int:clip_id>", methods=["DELETE"])

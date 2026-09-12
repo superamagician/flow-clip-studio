@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Admin Overview - Flow Clip Studio{% endblock %}
+{% block page_title %}Admin Overview (ภาพรวมทั้งระบบ){% endblock %}
+{% block head %}
+<style>
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .stat-card .label { font-size: 12px; color: var(--muted); }
+  .stat-card .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+  .stat-card .value.danger { color: var(--danger); }
+  .section { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+             padding: 18px; margin-bottom: 20px; }
+  .section h3 { margin: 0 0 14px; font-size: 14px; }
+  .note { background: var(--accent-soft); color: var(--accent); border-radius: 8px; padding: 10px 14px;
+          font-size: 12.5px; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 10px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+  th { background: var(--bg-alt); color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 20px; }
+</style>
+{% endblock %}
+{% block content %}
+  <div class="note">
+    ตัวเลขนี้ไม่รวมขนาดไฟล์เป็นไบต์ (จำนวนคลิปใช้แทนสัดส่วนพื้นที่แทน) —
+    เช็คพื้นที่ Storage/Database จริงเทียบกับโควตาแพลนได้ที่
+    <a href="https://supabase.com/dashboard" target="_blank" style="text-decoration:underline">Supabase Dashboard</a> โดยตรง
+  </div>
+  <div class="stat-grid" id="statGrid"></div>
+  <div class="section">
+    <h3>งานที่ล้มเหลวล่าสุด (ทุกลูกค้า)</h3>
+    <div id="failuresTable"></div>
+  </div>
+{% endblock %}
+{% block scripts %}
+<script>
+  async function main() {
+    const res = await fetch("/api/admin/overview");
+    const data = await res.json();
+    if (data.error) { document.getElementById("statGrid").innerHTML = `<div class="empty">${data.error}</div>`; return; }
+
+    const cards = [
+      { label: "ลูกค้าทั้งหมด", value: data.total_users },
+      { label: "คลิปทั้งหมด (ปัจจุบัน)", value: data.total_clips },
+      { label: `งานที่ส่ง (${data.window_days} วันล่าสุด)`, value: data.jobs_submitted },
+      { label: "สำเร็จ", value: data.jobs_completed },
+      { label: "ล้มเหลว", value: data.jobs_failed, cls: data.jobs_failed ? "danger" : "" },
+      { label: "ลบอัตโนมัติ (หมดอายุ)", value: data.clips_auto_deleted },
+    ];
+    document.getElementById("statGrid").innerHTML = cards.map(c => `
+      <div class="stat-card"><div class="label">${c.label}</div><div class="value ${c.cls || ''}">${c.value}</div></div>
+    `).join("");
+
+    const el = document.getElementById("failuresTable");
+    if (!data.recent_failures.length) {
+      el.innerHTML = '<div class="empty">ไม่มีงานล้มเหลวล่าสุด</div>';
+      return;
+    }
+    el.innerHTML = `<table>
+      <thead><tr><th>เวลา</th><th>ลูกค้า</th><th>ประเภท</th><th>รายละเอียด</th></tr></thead>
+      <tbody>${data.recent_failures.map(f => `
+        <tr>
+          <td>${f.ts}</td>
+          <td>${f.username}</td>
+          <td>${f.action}</td>
+          <td>${f.error || f.segment_id || "-"}</td>
+        </tr>
+      `).join("")}</tbody>
+    </table>`;
+  }
+  main();
+</script>
+{% endblock %}

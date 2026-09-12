@@ -14,6 +14,11 @@
 #                    URL = your project URL, key = Settings -> API -> service_role secret (NOT anon).
 #                    Bucket name defaults to "clips" if SUPABASE_STORAGE_BUCKET isn't set. Optional -
 #                    if unset, the app still runs, it just loses clips again on the next deploy.
+#   CLIP_RETENTION_DAYS - clips older than this are auto-deleted (local disk + Storage + DB)
+#                    by a background job that runs every 6 hours. Default 30. Set to 0 to
+#                    disable (keeps every clip forever - Storage/DB usage then only grows).
+#   ADMIN_USERNAMES  - comma-separated usernames allowed to view /admin (platform-wide
+#                    stats across all customers). Empty by default (nobody can access it).
 services:
   - type: web
     name: flow-clip-studio
@@ -30,4 +35,8 @@ services:
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
+        sync: false
+      - key: CLIP_RETENTION_DAYS
+        sync: false
+      - key: ADMIN_USERNAMES
         sync: false

@@ -61,3 +61,23 @@ def upload(local_path: Path, object_path: str) -> str | None:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Supabase Storage upload failed: HTTP {exc.code} {detail}") from exc
     return public_url(object_path)
+
+
+def delete(object_path: str) -> None:
+    """Delete an object from Supabase Storage. No-op if Storage isn't
+    configured; raises on a real delete failure (caller decides whether
+    that's fatal - a stale row with a dangling file is not worth crashing
+    a cleanup pass over)."""
+    url, key, bucket = _config()
+    if not url or not key:
+        return
+    endpoint = f"{url}/storage/v1/object/{bucket}/{object_path}"
+    req = urllib.request.Request(
+        endpoint, method="DELETE",
+        headers={"Authorization": f"Bearer {key}", "apikey": key})
+    try:
+        with urllib.request.urlopen(req, timeout=60):
+            pass
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Supabase Storage delete failed: HTTP {exc.code} {detail}") from exc

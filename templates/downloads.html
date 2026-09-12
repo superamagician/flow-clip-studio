@@ -42,7 +42,14 @@
     document.getElementById("summaryBar").innerHTML = `
       <div class="summary-pill">จำนวนไฟล์<b>${data.clips.length}</b></div>
       <div class="summary-pill">พื้นที่ใช้ทั้งหมด<b>${fmtBytes(data.total_bytes)}</b></div>
+      ${data.retention_days > 0 ? `<div class="summary-pill">เก็บไฟล์ไว้<b>${data.retention_days} วัน</b></div>` : ""}
     `;
+    if (data.retention_days > 0) {
+      const notice = document.createElement("div");
+      notice.style.cssText = "font-size:12.5px;color:var(--muted);margin-bottom:14px";
+      notice.textContent = `ไฟล์จะถูกลบอัตโนมัติเมื่อเก่ากว่า ${data.retention_days} วัน — ดาวน์โหลดเก็บไว้ก่อนถ้ายังต้องใช้`;
+      document.getElementById("summaryBar").after(notice);
+    }
     render(data.clips);
   }
 
