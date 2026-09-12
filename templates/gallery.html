@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}คลังคลิป - Flow Clip Studio{% endblock %}
+{% block page_title %}คลังคลิปทั้งหมด{% endblock %}
+{% block head %}
+<style>
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+  .tab {
+    padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text); font-size: 13px; cursor: pointer;
+  }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .category-block { margin-bottom: 32px; }
+  .category-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+          overflow: hidden; display: flex; flex-direction: column; }
+  .card video { width: 100%; aspect-ratio: 9/16; background: #000; display: block; }
+  .card .meta { padding: 8px 10px; }
+  .card .segment { font-weight: 600; font-size: 12.5px; }
+  .card .variant { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .card .specs { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+</style>
+{% endblock %}
+{% block content %}
+  <div class="tabs" id="tabs"></div>
+  <div id="galleryContent"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const ALL_KEY = "all";
+  async function main() {
+    const res = await fetch("/api/manifest");
+    const clips = await res.json();
+    const contentEl = document.getElementById("galleryContent");
+    if (!clips.length) {
+      contentEl.innerHTML = '<div class="empty">ยังไม่มีคลิป — ลองสร้างคลิปแรกที่หน้า "สร้างคลิป"</div>';
+      return;
+    }
+    const categories = [...new Set(clips.map(c => c.category))];
+    const tabsEl = document.getElementById("tabs");
+    tabsEl.appendChild(makeTab("ทั้งหมด", ALL_KEY, true));
+    categories.forEach(cat => tabsEl.appendChild(makeTab(cat, cat, false)));
+
+    function makeTab(label, key, active) {
+      const el = document.createElement("div");
+      el.className = "tab" + (active ? " active" : "");
+      const short = label.length > 28 ? label.slice(0, 28).trim() + "…" : label;
+      el.textContent = short;
+      el.title = label;
+      el.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+        el.classList.add("active");
+        render(key);
+      });
+      return el;
+    }
+
+    function render(filterKey) {
+      contentEl.innerHTML = "";
+      const active = filterKey === ALL_KEY ? categories : [filterKey];
+      active.forEach(cat => {
+        const items = clips.filter(c => c.category === cat);
+        if (!items.length) return;
+        const block = document.createElement("div");
+        block.className = "category-block";
+        block.innerHTML = `<div class="category-title">${cat} (${items.length})</div>`;
+        const grid = document.createElement("div");
+        grid.className = "grid";
+        items.forEach(clip => {
+          const card = document.createElement("div");
+          card.className = "card";
+          const video = document.createElement("video");
+          video.controls = true; video.preload = "none";
+          if (clip.thumbnail) video.poster = "/outputs/" + clip.thumbnail;
+          video.src = "/outputs/" + clip.file;
+          card.appendChild(video);
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          meta.innerHTML = `
+            <div class="segment">${clip.segment}</div>
+            ${clip.variant ? `<div class="variant">${clip.variant}</div>` : ""}
+            <div class="specs">${clip.width || "?"}×${clip.height || "?"} · ${clip.duration || "?"}s</div>
+          `;
+          card.appendChild(meta);
+          grid.appendChild(card);
+        });
+        block.appendChild(grid);
+        contentEl.appendChild(block);
+      });
+    }
+    render(ALL_KEY);
+  }
+  main();
+</script>
+{% endblock %}

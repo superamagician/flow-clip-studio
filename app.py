@@ -1,0 +1,688 @@
+#!/usr/bin/env python3
+"""Local multi-user web app: create-clip form + live generation + gallery.
+
+Run:
+    python app.py
+Then open http://localhost:5000/
+
+Phase 1 of "hosted service" plan: each registered user has their OWN encrypted
+API credentials (useapi.net token, Google Flow email, TikTok token, etc.), own
+character roster, own clip gallery, own activity log, and own output folder —
+fully isolated in SQLite (db.py) + per-user folders under userdata/<user_id>/.
+Still runs on one machine (no cloud hosting / billing yet — that's Phase 2).
+"""
+from __future__ import annotations
+import functools
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+import uuid
+from pathlib import Path
+
+from flask import (Flask, jsonify, request, render_template, send_from_directory,
+                    session, redirect, url_for, flash)
+
+ROOT = Path(__file__).resolve().parent
+USERDATA_DIR = ROOT / "userdata"
+
+
+def _load_dotenv(path: Path) -> None:
+    """Load .env into os.environ before importing db (which reads DATABASE_URL/
+    MASTER_KEY at call time / first import) — local dev only; a real deploy sets
+    these as actual environment variables in the host's dashboard instead."""
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv(ROOT / ".env")
+
+import db  # noqa: E402  (must come after _load_dotenv so DATABASE_URL/MASTER_KEY are set)
+
+sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(Path.home() / ".claude" / "skills" / "google-flow-rest" / "scripts"))
+import build_batch_from_brief as bbf  # noqa: E402
+import caption_writer  # noqa: E402
+import google_flow_rest as gfr  # noqa: E402
+
+def _default_ffmpeg_bin() -> str | None:
+    win_bin = (Path(r"C:\Users\KJ\AppData\Local\Microsoft\WinGet\Packages") /
+               "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe" /
+               "ffmpeg-9.0.1-full_build" / "bin")
+    return str(win_bin) if win_bin.exists() else None
+
+
+_FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or _default_ffmpeg_bin()
+FFPROBE = str(Path(_FFMPEG_BIN) / "ffprobe.exe") if _FFMPEG_BIN else "ffprobe"
+FFMPEG = str(Path(_FFMPEG_BIN) / "ffmpeg.exe") if _FFMPEG_BIN else "ffmpeg"
+# On Linux containers, ffmpeg/ffprobe are on PATH (no .exe) and a Thai-capable font
+# must be installed via the Dockerfile (fonts-thai-tlwg) rather than pointing at Windows Fonts.
+if os.name != "nt":
+    FFPROBE, FFMPEG = "ffprobe", "ffmpeg"
+    FONT_PATH = os.environ.get("FONT_PATH", "/usr/share/fonts/truetype/tlwg/Garuda.ttf")
+else:
+    FONT_PATH = r"C:\Windows\Fonts\tahoma.ttf"
+
+app = Flask(__name__)
+app.secret_key = db._get_or_create_master_key()  # local phase: reuse the encryption key file as session secret
+LOCK = threading.Lock()
+
+DEFAULT_CHARACTERS = [
+    {"id": "nong_mind", "name": "น้องมายด์", "gender": "female", "age_range": "20-25",
+     "style_archetype": "trendy streetwear",
+     "appearance": "Long dark hair with soft curtain bangs, slim build, bright expressive eyes, small hoop earrings.",
+     "wardrobe": "Oversized graphic tees, trendy streetwear, layered accessories.", "energy": "playful",
+     "presenter_desc": "a playful young Thai woman in her early twenties with long dark hair and curtain bangs, wearing trendy oversized streetwear and small hoop earrings, energetic and bubbly expression",
+     "best_for": "beauty, fashion, food, TikTok-native products"},
+    {"id": "phi_boy", "name": "พี่บอย", "gender": "male", "age_range": "30-40",
+     "style_archetype": "corporate/professional",
+     "appearance": "Short neat black hair, clean-shaven, thin-frame glasses, average build, calm friendly face.",
+     "wardrobe": "Button-up shirts or smart-casual polo, minimal accessories.", "energy": "calm/warm",
+     "presenter_desc": "a calm and warm Thai man in his early thirties, short neat hair, clean-shaven, thin-frame glasses, wearing a smart-casual button-up shirt, trustworthy professional demeanor",
+     "best_for": "tech, home goods, finance-adjacent, general household products"},
+    {"id": "je_maem", "name": "เจ๊แหม่ม", "gender": "female", "age_range": "45+",
+     "style_archetype": "mom/dad-next-door",
+     "appearance": "Short curly hair, warm round face, average-plus build, wears a simple apron over homewear.",
+     "wardrobe": "Comfortable homewear, apron when in kitchen/cleaning scenes.", "energy": "warm",
+     "presenter_desc": "a warm middle-aged Thai housekeeper aunty with short curly hair, wearing a simple apron over comfortable homewear, cheerful and nurturing expression",
+     "best_for": "home cleaning, cooking, household products"},
+    {"id": "nong_pun", "name": "น้องปั้น", "gender": "male", "age_range": "20-25",
+     "style_archetype": "gamer/tech-enthusiast",
+     "appearance": "Short black hair, thick black-framed glasses, slim build, casual gamer look.",
+     "wardrobe": "Dark t-shirts, gaming-brand hoodies, seated at a gaming desk setup.", "energy": "energetic",
+     "presenter_desc": "a young Thai man in his early twenties with short black hair and thick black-framed glasses, casual gamer style dark t-shirt, seated at a gaming desk setup, energetic and enthusiastic expression",
+     "best_for": "gaming, tech gadgets, electronics"},
+    {"id": "kru_koi", "name": "ครูก้อย", "gender": "female", "age_range": "30-40",
+     "style_archetype": "elegant/minimalist",
+     "appearance": "Long straight dark hair, no glasses, slim build, clear smooth skin, poised posture.",
+     "wardrobe": "Minimalist neutral-tone blouses, subtle jewelry.", "energy": "professional/calm",
+     "presenter_desc": "an elegant Thai woman in her mid-thirties with long straight dark hair, no glasses, wearing a minimalist neutral-tone blouse, poised and calm professional demeanor",
+     "best_for": "beauty, skincare, health, premium products"},
+    {"id": "bang_pao", "name": "บังเปา", "gender": "male", "age_range": "30-40",
+     "style_archetype": "sporty/active",
+     "appearance": "Short buzzed hair, athletic muscular build, visible tattoo on forearm, tanned skin.",
+     "wardrobe": "Athletic wear, sports tank tops or fitted t-shirts.", "energy": "energetic",
+     "presenter_desc": "an athletic Thai man in his mid-thirties with short buzzed hair, muscular build, a visible tattoo on his forearm, tanned skin, wearing athletic sportswear, energetic and confident demeanor",
+     "best_for": "fitness, outdoor gear, sports products"},
+]
+
+CATEGORY_KEYWORDS = {
+    "gaming": ["เกม", "เกมมิ่ง", "จอย", "คีย์บอร์ด", "เมาส์", "การ์ดจอ"],
+    "tech": ["หูฟัง", "มือถือ", "แกดเจ็ต", "ไมค์", "สายชาร์จ", "พาวเวอร์แบงค์", "ลำโพง", "อิเล็กทรอนิกส์", "ขาตั้ง"],
+    "electronics": ["หูฟัง", "มือถือ", "แกดเจ็ต", "อิเล็กทรอนิกส์"],
+    "beauty": ["ครีม", "เซรั่ม", "ผิว", "ความงาม", "แต่งหน้า", "ลิป", "กันแดด", "คอลลาเจน", "มาส์ก"],
+    "skincare": ["ครีม", "เซรั่ม", "ผิว", "กันแดด", "มาส์กหน้า"],
+    "health": ["วิตามิน", "อาหารเสริม", "สุขภาพ"],
+    "home cleaning": ["น้ำยา", "ถูพื้น", "ซัก", "ทำความสะอาด", "ผงซักฟอก"],
+    "cooking": ["ครัว", "หม้อ", "กระทะ", "จาน", "กาแฟ", "เครื่องชง", "เตา"],
+    "household products": ["เฟอร์นิเจอร์", "เก้าอี้", "โต๊ะ", "เครื่องใช้ไฟฟ้า", "ของใช้ในบ้าน"],
+    "home goods": ["เฟอร์นิเจอร์", "เก้าอี้", "โต๊ะ", "เครื่องใช้ไฟฟ้า"],
+    "fitness": ["ฟิตเนส", "ออกกำลังกาย", "โยคะ", "ดัมเบล", "วิ่ง", "โปรตีน"],
+    "sports": ["กีฬา", "ฟิตเนส", "ออกกำลังกาย"],
+    "outdoor gear": ["เดินป่า", "แคมป์ปิ้ง", "กลางแจ้ง"],
+    "fashion": ["เสื้อผ้า", "แฟชั่น", "กระเป๋า", "รองเท้า", "ชุดชั้นใน", "บรา"],
+    "food": ["ขนม", "อาหาร", "ช็อกโกแลต", "เครื่องดื่ม", "ของหวาน"],
+}
+
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def login_required(view):
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def current_user_id() -> int:
+    return session["user_id"]
+
+
+def user_dir(user_id: int) -> Path:
+    d = USERDATA_DIR / str(user_id)
+    for sub in ("outputs", "outputs/thumbnails", "outputs/jobs", "uploads"):
+        (d / sub).mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_client(user_id: int) -> gfr.Client:
+    return gfr.Client(db.get_credential(user_id, "USEAPI_TOKEN"))
+
+
+def raw_get(user_id: int, url: str) -> dict | None:
+    token = db.get_credential(user_id, "USEAPI_TOKEN")
+    if not token:
+        return None
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {token}", "Accept": "application/json",
+        "User-Agent": "google-flow-rest-skill/1.0",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+        return None
+
+
+def latest_flow_credits(user_id: int) -> int | None:
+    best_time, best_credits = "", None
+    for job_file in (user_dir(user_id) / "outputs" / "jobs").glob("*.json"):
+        try:
+            data = json.loads(job_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        credits = data.get("response", {}).get("remainingCredits")
+        updated = data.get("updated") or data.get("created") or ""
+        if credits is not None and updated > best_time:
+            best_time, best_credits = updated, credits
+    return best_credits
+
+
+def ffprobe_info(path: Path) -> dict:
+    result = subprocess.run(
+        [FFPROBE, "-v", "error", "-show_entries", "format=duration",
+         "-show_entries", "stream=width,height,codec_type", "-of", "json", str(path)],
+        capture_output=True, text=True, check=True)
+    data = json.loads(result.stdout)
+    width = height = None
+    for stream in data.get("streams", []):
+        if stream.get("codec_type") == "video":
+            width, height = stream.get("width"), stream.get("height")
+            break
+    duration = float(data.get("format", {}).get("duration", 0))
+    return {"duration": round(duration, 1), "width": width, "height": height}
+
+
+def make_thumbnail(video_path: Path, thumb_path: Path) -> None:
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [FFMPEG, "-y", "-ss", "1", "-i", str(video_path), "-vframes", "1",
+         "-vf", "scale=320:-1", str(thumb_path)],
+        capture_output=True, check=True)
+
+
+def apply_watermark(input_path: Path, watermark: dict) -> None:
+    text = (watermark or {}).get("text", "").strip()
+    logo = (watermark or {}).get("logo", "").strip()
+    if not text and not logo:
+        return
+    position = (watermark or {}).get("position") or "bottom-right"
+    opacity = float((watermark or {}).get("opacity") or 0.6)
+    tmp_path = input_path.with_name(f"_wm_{uuid.uuid4().hex}.mp4")
+
+    if logo and Path(logo).exists():
+        pos_overlay = {
+            "top-left": "10:10", "top-right": "W-w-10:10",
+            "bottom-left": "10:H-h-10", "bottom-right": "W-w-10:H-h-10",
+            "center": "(W-w)/2:(H-h)/2",
+        }.get(position, "W-w-10:H-h-10")
+        filter_complex = (f"[1:v]format=rgba,colorchannelmixer=aa={opacity}[wm];"
+                           f"[0:v][wm]overlay={pos_overlay}")
+        cmd = [FFMPEG, "-y", "-i", str(input_path), "-i", logo,
+               "-filter_complex", filter_complex, "-codec:a", "copy", str(tmp_path)]
+    else:
+        pos_text = {
+            "top-left": "x=10:y=10", "top-right": "x=w-text_w-10:y=10",
+            "bottom-left": "x=10:y=h-text_h-10", "bottom-right": "x=w-text_w-10:y=h-text_h-10",
+            "center": "x=(w-text_w)/2:y=(h-text_h)/2",
+        }.get(position, "x=w-text_w-10:y=h-text_h-10")
+        escaped = text.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        font_arg = FONT_PATH.replace("\\", "/").replace(":", "\\:")
+        vf = (f"drawtext=fontfile='{font_arg}':text='{escaped}':fontsize=28:"
+              f"fontcolor=white@{opacity}:{pos_text}:shadowcolor=black@0.5:shadowx=1:shadowy=1")
+        cmd = [FFMPEG, "-y", "-i", str(input_path), "-vf", vf, "-codec:a", "copy", str(tmp_path)]
+
+    subprocess.run(cmd, capture_output=True, check=True, text=True)
+    tmp_path.replace(input_path)
+
+
+def slugify(name: str) -> str:
+    ascii_only = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower()
+    return ascii_only or "product"
+
+
+def autofill(brief: dict) -> dict:
+    brief = dict(brief)
+    name = (brief.get("product_name") or "").strip() or "สินค้านี้"
+    if not brief.get("product_id"):
+        brief["product_id"] = slugify(name)
+    if not brief.get("product_visual_desc"):
+        brief["product_visual_desc"] = (
+            f'the product exactly as shown in the attached reference photo (a product called '
+            f'"{name}"), matching its real colors, materials, shape, and label/logo design precisely')
+    if not brief.get("presenter_desc"):
+        brief["presenter_desc"] = ("a friendly, good-looking young Asian presenter with a warm "
+                                    "genuine smile, in a bright clean modern room")
+    if not brief.get("hook_line_1"):
+        brief["hook_line_1"] = f"ยังไม่มี {name}?"
+    if not brief.get("hook_line_2"):
+        brief["hook_line_2"] = "พลาดแล้วจะเสียใจ"
+    if not brief.get("feature_tag_1"):
+        brief["feature_tag_1"] = "คุณภาพดี"
+    if not brief.get("feature_tag_2"):
+        brief["feature_tag_2"] = "ใช้งานง่าย"
+    if not brief.get("feature_tag_3"):
+        brief["feature_tag_3"] = "คุ้มราคาสุดๆ"
+    if not brief.get("upgrade_hook_1"):
+        brief["upgrade_hook_1"] = f"อัปเกรด{name}"
+    if not brief.get("upgrade_hook_2"):
+        brief["upgrade_hook_2"] = "ให้ชีวิตดีขึ้น"
+    if not brief.get("cta_text"):
+        brief["cta_text"] = "พิกัดตะกร้าด้านล่างเลย"
+    return brief
+
+
+def suggest_character(user_id: int, product_text: str) -> dict | None:
+    characters = db.list_characters(user_id)
+    text = product_text.lower()
+    matched_categories = {cat for cat, keywords in CATEGORY_KEYWORDS.items()
+                           if any(kw in text for kw in keywords)}
+    if not matched_categories:
+        return None
+    best_char, best_score = None, 0
+    for char in characters:
+        best_for = (char.get("best_for") or "").lower()
+        score = sum(1 for cat in matched_categories if cat in best_for)
+        if score > best_score:
+            best_char, best_score = char, score
+    return best_char
+
+
+# ---------------------------------------------------------------------------
+# Auth routes
+# ---------------------------------------------------------------------------
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        if not username or not password:
+            flash("กรอกชื่อผู้ใช้และรหัสผ่านให้ครบ")
+            return render_template("register.html")
+        try:
+            user_id = db.create_user(username, password)
+        except Exception:  # noqa: BLE001
+            flash("ชื่อผู้ใช้นี้มีคนใช้แล้ว")
+            return render_template("register.html")
+        for char in DEFAULT_CHARACTERS:
+            db.add_character(user_id, char)
+        user_dir(user_id)
+        session["user_id"] = user_id
+        session["username"] = username
+        return redirect(url_for("index"))
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        user = db.verify_user(username, password)
+        if not user:
+            flash("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
+            return render_template("login.html")
+        session["user_id"] = user["id"]
+        session["username"] = user["username"]
+        return redirect(url_for("index"))
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+# ---------------------------------------------------------------------------
+# Settings (per-user credentials)
+# ---------------------------------------------------------------------------
+
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+def settings():
+    uid = current_user_id()
+    if request.method == "POST":
+        for service in ("USEAPI_TOKEN", "GOOGLE_FLOW_EMAIL", "TIKTOK_ACCESS_TOKEN"):
+            value = request.form.get(service, "").strip()
+            if value:
+                db.set_credential(uid, service, value)
+        flash("บันทึกแล้ว")
+        return redirect(url_for("settings"))
+    connected_services = set(db.list_credential_services(uid))
+    return render_template("settings.html", active="settings",
+                            has_useapi="USEAPI_TOKEN" in connected_services,
+                            has_flow_email="GOOGLE_FLOW_EMAIL" in connected_services,
+                            has_tiktok="TIKTOK_ACCESS_TOKEN" in connected_services)
+
+
+# ---------------------------------------------------------------------------
+# Main pages
+# ---------------------------------------------------------------------------
+
+@app.route("/")
+@login_required
+def index():
+    return render_template("create.html", genres=list(bbf.GENRES.keys()), active="create")
+
+
+@app.route("/gallery")
+@login_required
+def gallery():
+    return render_template("gallery.html", active="gallery")
+
+
+@app.route("/log")
+@login_required
+def log_page():
+    return render_template("log.html", active="log")
+
+
+# ---------------------------------------------------------------------------
+# API: preview / captions / characters
+# ---------------------------------------------------------------------------
+
+@app.route("/api/preview", methods=["POST"])
+@login_required
+def api_preview():
+    uid = current_user_id()
+    brief = autofill(request.get_json(force=True))
+    try:
+        rows = bbf.build_rows(brief)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 400
+    db.log_event(uid, "preview", category=brief.get("product_name"), genre=brief.get("genre"))
+    return jsonify({"segments": [
+        {"id": r["id"], "prompt": r["prompt"], "model": r["model"],
+         "aspect_ratio": r["aspect_ratio"], "resolution": r["resolution"], "duration": r["duration"]}
+        for r in rows
+    ]})
+
+
+@app.route("/api/captions", methods=["POST"])
+@login_required
+def api_captions():
+    payload = request.get_json(force=True)
+    brief = autofill(payload.get("brief") or {})
+    platforms = payload.get("platforms") or ["tiktok", "facebook", "shopee"]
+    result = caption_writer.generate(brief, platforms)
+    db.log_event(current_user_id(), "captions_generated", category=brief.get("product_name"), platforms=platforms)
+    return jsonify(result)
+
+
+@app.route("/api/characters")
+@login_required
+def api_characters():
+    return jsonify(db.list_characters(current_user_id()))
+
+
+@app.route("/api/suggest_character", methods=["POST"])
+@login_required
+def api_suggest_character():
+    payload = request.get_json(force=True)
+    text = f"{payload.get('product_name', '')} {payload.get('product_visual_desc', '')}"
+    return jsonify({"character": suggest_character(current_user_id(), text)})
+
+
+@app.route("/api/upload_reference", methods=["POST"])
+@login_required
+def api_upload_reference():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "No file uploaded"}), 400
+    ext = Path(file.filename).suffix or ".jpg"
+    dest = user_dir(current_user_id()) / "uploads" / f"{uuid.uuid4().hex}{ext}"
+    file.save(dest)
+    return jsonify({"path": str(dest)})
+
+
+@app.route("/api/flow_accounts")
+@login_required
+def api_flow_accounts():
+    client = get_client(current_user_id())
+    if not client.token:
+        return jsonify({"emails": []})
+    try:
+        accounts = client.accounts()
+    except Exception:  # noqa: BLE001
+        return jsonify({"emails": []})
+    return jsonify({"emails": list(accounts.keys())})
+
+
+# ---------------------------------------------------------------------------
+# API: generate / concatenate / status
+# ---------------------------------------------------------------------------
+
+@app.route("/api/generate", methods=["POST"])
+@login_required
+def api_generate():
+    uid = current_user_id()
+    payload = request.get_json(force=True)
+    brief = autofill(payload.get("brief") or {})
+    segment_ids = set(payload.get("segment_ids") or [])
+    category = brief.get("product_name") or brief.get("product_id") or "ไม่ระบุสินค้า"
+    variant = brief.get("variant_label", "")
+    watermark = {
+        "text": brief.get("watermark_text", ""),
+        "logo": brief.get("watermark_logo", ""),
+        "position": brief.get("watermark_position") or "bottom-right",
+        "opacity": brief.get("watermark_opacity") or 0.6,
+    }
+    account_email = brief.get("account_email") or db.get_credential(uid, "GOOGLE_FLOW_EMAIL")
+
+    try:
+        rows = bbf.build_rows(brief)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 400
+
+    client = get_client(uid)
+    if not client.token:
+        return jsonify({"error": "ยังไม่ได้ตั้งค่า USEAPI_TOKEN — ไปที่หน้า ตั้งค่า ก่อน"}), 400
+
+    outputs_dir = user_dir(uid) / "outputs"
+    db.log_event(uid, "generate_request", category=category, segment_ids=sorted(segment_ids),
+                 account_email=account_email, has_watermark=bool(watermark["text"] or watermark["logo"]))
+
+    results = []
+    for row in rows:
+        if row["id"] not in segment_ids:
+            continue
+        references = [row["reference_images"]] if row.get("reference_images") else []
+        try:
+            gfr.validate(row["model"], row["aspect_ratio"], row["resolution"],
+                         int(row["duration"]), int(row["count"]))
+            gfr_payload = gfr.build_payload(
+                client, row["prompt"], row["model"], row["aspect_ratio"],
+                row["resolution"], int(row["duration"]), int(row["count"]),
+                account_email, "", references, do_upload=True)
+            api_result = client.submit(gfr_payload)
+            jid = gfr.get_job_id(api_result)
+            if not jid:
+                raise RuntimeError("Submission returned no job ID")
+            safe_name = gfr.safe_filename(jid)
+            gfr.save_json(api_result, outputs_dir / "jobs" / f"{safe_name}.json")
+            segment_label = {"a": "A - Hook", "b": "B - Feature", "c": "C - CTA"}.get(
+                row["id"].rsplit("_", 1)[-1], row["id"])
+            db.set_pending_job(jid, uid, category, segment_label, variant, watermark)
+            db.log_event(uid, "job_submitted", job_id=jid, segment_id=row["id"], category=category)
+            results.append({"segment_id": row["id"], "job_id": jid, "status": "submitted"})
+        except Exception as exc:  # noqa: BLE001
+            db.log_event(uid, "job_submit_failed", segment_id=row["id"], category=category, error=str(exc))
+            results.append({"segment_id": row["id"], "error": str(exc)})
+
+    return jsonify({"results": results})
+
+
+@app.route("/api/status/<path:job_id>")
+@login_required
+def api_job_status(job_id: str):
+    uid = current_user_id()
+    outputs_dir = user_dir(uid) / "outputs"
+    client = get_client(uid)
+    result = client.job(job_id)
+    status = str(result.get("status", "unknown")).lower()
+    safe_name = gfr.safe_filename(job_id)
+    gfr.save_json(result, outputs_dir / "jobs" / f"{safe_name}.json")
+
+    file_url = None
+    if status == "completed":
+        media = gfr.get_media(result)
+        existing = list(outputs_dir.glob(f"{safe_name}_*.mp4"))
+        if existing:
+            file_url = f"/outputs/{existing[0].name}"
+        elif media and media[0].get("videoUrl"):
+            out_path = outputs_dir / f"{safe_name}_01.mp4"
+            gfr.download(media[0]["videoUrl"], out_path)
+            file_url = f"/outputs/{out_path.name}"
+
+        if file_url:
+            fname = Path(file_url).name
+            if not db.clip_exists(uid, fname):
+                video_path = outputs_dir / fname
+                meta = db.pop_pending_job(job_id) or {
+                    "category": "ทดสอบ", "segment": fname, "variant": "", "watermark": {}}
+                try:
+                    apply_watermark(video_path, meta.get("watermark"))
+                except subprocess.CalledProcessError as exc:
+                    db.log_event(uid, "watermark_failed", job_id=job_id,
+                                 error=exc.stderr[-300:] if exc.stderr else str(exc))
+
+                info = ffprobe_info(video_path)
+                thumb_name = video_path.stem + ".jpg"
+                try:
+                    make_thumbnail(video_path, outputs_dir / "thumbnails" / thumb_name)
+                except subprocess.CalledProcessError:
+                    thumb_name = None
+                db.add_clip(uid, {
+                    "file": fname, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
+                    "category": meta["category"], "segment": meta["segment"],
+                    "variant": meta["variant"], **info,
+                })
+                db.log_event(uid, "job_completed", job_id=job_id, category=meta["category"],
+                             segment=meta["segment"], file=fname, duration=info["duration"])
+    elif status == "failed":
+        db.log_event(uid, "job_failed", job_id=job_id)
+
+    return jsonify({"status": status, "file_url": file_url})
+
+
+@app.route("/api/concatenate", methods=["POST"])
+@login_required
+def api_concatenate():
+    uid = current_user_id()
+    outputs_dir = user_dir(uid) / "outputs"
+    payload = request.get_json(force=True)
+    file_urls = payload.get("file_urls") or []
+    category = payload.get("category") or "ไม่ระบุสินค้า"
+    product_id = payload.get("product_id") or slugify(category)
+
+    if len(file_urls) < 2:
+        return jsonify({"error": "ต้องมีอย่างน้อย 2 คลิปถึงจะต่อได้"}), 400
+
+    filenames = [Path(u).name for u in file_urls]
+    for fname in filenames:
+        if not (outputs_dir / fname).exists():
+            return jsonify({"error": f"ไม่พบไฟล์ {fname}"}), 400
+
+    list_lines = "\n".join(f"file '{(outputs_dir / f).resolve()}'" for f in filenames) + "\n"
+    list_path = outputs_dir / f"_concat_{uuid.uuid4().hex}.txt"
+    list_path.write_text(list_lines, encoding="utf-8")
+
+    out_name = f"{product_id}_combined_{uuid.uuid4().hex[:8]}.mp4"
+    out_path = outputs_dir / out_name
+    try:
+        subprocess.run(
+            [FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", str(list_path),
+             "-c", "copy", str(out_path)],
+            capture_output=True, check=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        return jsonify({"error": f"ffmpeg ต่อคลิปล้มเหลว: {exc.stderr[-400:]}"}), 500
+    finally:
+        list_path.unlink(missing_ok=True)
+
+    info = ffprobe_info(out_path)
+    thumb_name = out_path.stem + ".jpg"
+    try:
+        make_thumbnail(out_path, outputs_dir / "thumbnails" / thumb_name)
+    except subprocess.CalledProcessError:
+        thumb_name = None
+
+    db.add_clip(uid, {
+        "file": out_name, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
+        "category": category, "segment": f"คลิปรวม {round(info['duration'])} วินาที",
+        "variant": "", **info,
+    })
+    db.log_event(uid, "concatenate", category=category, files=filenames, output=out_name, duration=info["duration"])
+
+    return jsonify({"file_url": f"/outputs/{out_name}", **info})
+
+
+# ---------------------------------------------------------------------------
+# API: account status / manifest / log
+# ---------------------------------------------------------------------------
+
+@app.route("/api/account_status")
+@login_required
+def api_account_status():
+    uid = current_user_id()
+    account = raw_get(uid, "https://api.useapi.net/v1/account") or {}
+    connected = account.get("accounts", {})
+
+    minimax_equity = None
+    if "MiniMax API" in connected:
+        minimax_equity = raw_get(uid, "https://api.useapi.net/v1/minimax/speech/equity")
+
+    all_services = ["Google Flow API", "MiniMax API", "Flow Music API", "Dreamina API",
+                     "Kling API", "Runway API", "PixVerse API", "Mureka API",
+                     "TemPolor API", "InsightFaceSwap API"]
+    services = [{"name": s, "connected": s in connected,
+                 "accounts": connected.get(s, {}).get("total", 0)} for s in all_services]
+
+    return jsonify({
+        "email": account.get("email"),
+        "subscription_active": account.get("subscriptionIsActive", False),
+        "services": services,
+        "flow_remaining_credits": latest_flow_credits(uid),
+        "minimax_equity": minimax_equity,
+    })
+
+
+@app.route("/api/manifest")
+@login_required
+def api_manifest():
+    return jsonify(db.list_clips(current_user_id()))
+
+
+@app.route("/api/log")
+@login_required
+def api_log():
+    limit = request.args.get("limit", type=int) or 200
+    return jsonify(db.list_log(current_user_id(), limit))
+
+
+@app.route("/outputs/<path:filename>")
+@login_required
+def serve_outputs(filename: str):
+    return send_from_directory(user_dir(current_user_id()) / "outputs", filename)
+
+
+if __name__ == "__main__":
+    db.init_db()
+    print("Local dashboard: http://localhost:5000/")
+    print("Gallery:         http://localhost:5000/gallery")
+    app.run(host="127.0.0.1", port=5000, debug=False)

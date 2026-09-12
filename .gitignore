@@ -1,0 +1,15 @@
+# Secrets - never commit
+.env
+.master.key
+app.db
+
+# Per-user data
+userdata/
+
+# Legacy single-user data (pre-multi-user, kept locally only)
+outputs/
+uploads/
+characters.json
+
+__pycache__/
+*.pyc

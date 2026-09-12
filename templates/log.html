@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Log - Flow Clip Studio{% endblock %}
+{% block page_title %}ประวัติการทำงาน (Log){% endblock %}
+{% block head %}
+<style>
+  .log-table { width: 100%; border-collapse: collapse; background: var(--panel);
+               border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .log-table th, .log-table td { text-align: left; padding: 8px 12px; font-size: 12.5px;
+                                  border-bottom: 1px solid var(--border); vertical-align: top; }
+  .log-table th { background: var(--bg-alt); color: var(--muted); font-weight: 600; }
+  .action-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .action-preview { background: #eef2f8; color: #3b5f8a; }
+  .action-generate_request { background: var(--accent-soft); color: var(--accent); }
+  .action-job_submitted { background: #eef2f8; color: #3b5f8a; }
+  .action-job_completed { background: #e7f2ec; color: #2f6f4e; }
+  .action-job_failed, .action-job_submit_failed, .action-watermark_failed { background: var(--danger-soft); color: var(--danger); }
+  .action-concatenate { background: #f3ecf8; color: #6b3fa0; }
+  .details { color: var(--muted); }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+</style>
+{% endblock %}
+{% block content %}
+  <div class="sub" style="color:var(--muted);font-size:13px;margin-bottom:16px;">
+    บันทึกทุกครั้งที่ preview / สร้างคลิป / job เสร็จ-ล้มเหลว / ต่อคลิป — ล่าสุดอยู่บนสุด
+  </div>
+  <div id="logContent"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const ACTION_LABELS = {
+    preview: "Preview", generate_request: "สั่งสร้างคลิป", job_submitted: "ส่งงานแล้ว",
+    job_submit_failed: "ส่งงานล้มเหลว", job_completed: "งานเสร็จ", job_failed: "งานล้มเหลว",
+    watermark_failed: "ใส่ลายน้ำล้มเหลว", concatenate: "ต่อคลิป",
+  };
+  function fmtDetails(entry) {
+    const skip = new Set(["ts", "action"]);
+    return Object.keys(entry).filter(k => !skip.has(k)).map(k => {
+      let v = entry[k];
+      if (Array.isArray(v)) v = v.join(", ");
+      if (typeof v === "object" && v !== null) v = JSON.stringify(v);
+      return `<b>${k}</b>: ${v}`;
+    }).join(" &middot; ");
+  }
+  async function main() {
+    const res = await fetch("/api/log");
+    const entries = await res.json();
+    const el = document.getElementById("logContent");
+    if (!entries.length) {
+      el.innerHTML = '<div class="empty">ยังไม่มีบันทึก</div>';
+      return;
+    }
+    const rows = entries.map(e => `
+      <tr>
+        <td style="white-space:nowrap">${e.ts}</td>
+        <td><span class="action-tag action-${e.action}">${ACTION_LABELS[e.action] || e.action}</span></td>
+        <td class="details">${fmtDetails(e)}</td>
+      </tr>
+    `).join("");
+    el.innerHTML = `<table class="log-table">
+      <thead><tr><th>เวลา</th><th>เหตุการณ์</th><th>รายละเอียด</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+  main();
+</script>
+{% endblock %}

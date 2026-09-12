@@ -1,0 +1,484 @@
+{% extends "base.html" %}
+{% block title %}สร้างคลิป - Flow Clip Studio{% endblock %}
+{% block page_title %}สร้างคลิปโฆษณา{% endblock %}
+{% block head %}
+<style>
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  fieldset { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
+             margin: 16px 0; background: var(--panel); }
+  legend { padding: 0 8px; color: var(--muted); font-size: 13px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], textarea, select {
+    width: 100%; background: #fff; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 11px; font-size: 13px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 44px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 10px 18px; font-size: 14px; cursor: pointer; margin-top: 8px;
+  }
+  button.secondary { background: var(--panel); border: 1px solid var(--border); color: var(--text); }
+  button.spend { background: var(--danger); }
+  button.big { width: 100%; padding: 15px; font-size: 16px; font-weight: 600; margin-top: 16px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
+  .prompt-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+                 padding: 12px; margin-bottom: 10px; font-size: 12px; line-height: 1.5; }
+  .prompt-card .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .prompt-card .segid { font-weight: 600; }
+  .prompt-text { color: var(--muted); white-space: pre-wrap; max-height: 140px; overflow-y: auto; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+  .job-card { display: flex; gap: 12px; align-items: center; background: var(--panel); border: 1px solid var(--border);
+              border-radius: var(--radius); padding: 10px; margin-bottom: 8px; }
+  .job-card video { width: 90px; aspect-ratio: 9/16; background: #000; border-radius: 6px; }
+  .status-pending { color: var(--warn); }
+  .status-completed { color: var(--ok); }
+  .status-failed { color: var(--danger); }
+  #previewSection, #jobsSection { display: none; }
+  .req { color: var(--danger); }
+</style>
+{% endblock %}
+{% block content %}
+  <div class="sub">อัปโหลดรูป + ตั้งชื่อสินค้า + เลือกแนว แล้วกดสร้างได้เลย ระบบช่วยแต่งคำโฆษณาให้อัตโนมัติ</div>
+
+  <form id="briefForm">
+    <fieldset>
+      <legend>ข้อมูลเบื้องต้น (แค่นี้พอ)</legend>
+      <label>ชื่อสินค้า <span class="req">*</span></label>
+      <input type="text" name="product_name" id="productNameInput" required placeholder="เช่น หูฟังเกมมิ่ง XYZ">
+
+      <label>รูปสินค้า <span class="req">*</span> (แนะนำ: ครอปให้เหลือสินค้าชิ้นเดียวชัดๆ จะได้ตรงปกที่สุด)</label>
+      <input type="file" id="refFile" accept="image/*" required>
+      <div class="sub" id="refStatus"></div>
+
+      <div class="row2">
+        <div>
+          <label>แนวคลิป (genre)</label>
+          <select name="genre">
+            {% for g in genres %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>ความยาวต่อ segment (วินาที)</label>
+          <select name="duration">
+            <option value="4">4</option><option value="6">6</option>
+            <option value="8">8</option><option value="10" selected>10</option>
+          </select>
+        </div>
+      </div>
+    </fieldset>
+
+    <details>
+      <summary>ปรับแต่งเพิ่มเติม (ไม่บังคับ — ปล่อยว่างได้ ระบบจะแต่งให้อัตโนมัติ)</summary>
+      <fieldset>
+        <legend>รายละเอียดสินค้า &amp; พรีเซนเตอร์</legend>
+        <label>Product ID (ภาษาอังกฤษ ไม่มีเว้นวรรค — ปล่อยว่างได้)</label>
+        <input type="text" name="product_id" placeholder="ระบบจะตั้งให้อัตโนมัติจากชื่อสินค้า">
+        <label>คำอธิบายรูปลักษณ์สินค้า (ภาษาอังกฤษ — ปล่อยว่างได้)</label>
+        <textarea name="product_visual_desc"></textarea>
+        <label>เลือกตัวละคร (พรีเซนเตอร์จากคลัง — ไม่บังคับ)</label>
+        <select id="characterSelect">
+          <option value="">-- ไม่เลือก / พิมพ์เอง --</option>
+        </select>
+        <div class="sub" id="characterInfo"></div>
+        <label>คำอธิบายพรีเซนเตอร์ (ภาษาอังกฤษ — ปล่อยว่างได้ถ้าไม่มีคน หรือเลือกตัวละครด้านบนแทน)</label>
+        <input type="text" name="presenter_desc" id="presenterDescInput" placeholder="เช่น a cheerful young Asian woman...">
+        <label>สไตล์ภาพ/ข้อความ (override จาก default นีออน/คอมิก — ปล่อยว่างได้)</label>
+        <textarea name="visual_style_desc" placeholder="เช่น clean navy blue and white, no neon..."></textarea>
+      </fieldset>
+
+      <fieldset>
+        <legend>Segment A - Hook</legend>
+        <div class="row2">
+          <div><label>Hook บรรทัด 1</label><input type="text" name="hook_line_1"></div>
+          <div><label>Hook บรรทัด 2</label><input type="text" name="hook_line_2"></div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Segment B - Feature</legend>
+        <div class="row3">
+          <div><label>แท็ก 1</label><input type="text" name="feature_tag_1"></div>
+          <div><label>แท็ก 2</label><input type="text" name="feature_tag_2"></div>
+          <div><label>แท็ก 3</label><input type="text" name="feature_tag_3"></div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Segment C - CTA</legend>
+        <div class="row2">
+          <div><label>Upgrade hook บรรทัด 1</label><input type="text" name="upgrade_hook_1"></div>
+          <div><label>Upgrade hook บรรทัด 2</label><input type="text" name="upgrade_hook_2"></div>
+        </div>
+        <label>ข้อความ CTA</label>
+        <input type="text" name="cta_text" placeholder="ค่า default: พิกัดตะกร้าด้านล่างเลย">
+      </fieldset>
+
+      <fieldset>
+        <legend>ลายน้ำ / โลโก้ (กันก๊อบปี้)</legend>
+        <label>ข้อความลายน้ำ (เช่น ชื่อร้าน/เพจ — ปล่อยว่างได้ถ้าไม่ใส่)</label>
+        <input type="text" name="watermark_text" placeholder="เช่น @myshop">
+        <label>หรืออัปโหลดโลโก้แทน (ถ้าอัปโหลด จะใช้โลโก้แทนข้อความ)</label>
+        <input type="file" id="logoFile" accept="image/*">
+        <div class="sub" id="logoStatus"></div>
+        <div class="row2">
+          <div>
+            <label>ตำแหน่ง</label>
+            <select name="watermark_position">
+              <option value="bottom-right" selected>ขวาล่าง</option>
+              <option value="bottom-left">ซ้ายล่าง</option>
+              <option value="top-right">ขวาบน</option>
+              <option value="top-left">ซ้ายบน</option>
+              <option value="center">กลาง</option>
+            </select>
+          </div>
+          <div>
+            <label>ความโปร่งใส (0.2–1.0)</label>
+            <input type="text" name="watermark_opacity" value="0.6">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset id="accountFieldset" style="display:none">
+        <legend>บัญชี Google Flow ที่ใช้ยิง</legend>
+        <select name="account_email" id="accountSelect"></select>
+      </fieldset>
+    </details>
+
+    <button type="button" class="big" id="createBtn">🎬 สร้างคลิปโฆษณา (A + B + C)</button>
+  </form>
+
+  <div id="previewSection">
+    <h2>พรอมต์ที่ระบบแต่งให้ (ยังไม่ส่ง)</h2>
+    <div id="promptCards"></div>
+    <button type="button" class="spend" id="generateBtn">🔴 ยืนยันสร้างจริง (หักเครดิตตาม segment ที่ติ๊กไว้)</button>
+    <button type="button" class="secondary" id="backBtn">← แก้ไขข้อมูล</button>
+  </div>
+
+  <div id="jobsSection">
+    <h2>สถานะงาน</h2>
+    <div id="jobCards"></div>
+  </div>
+
+  <fieldset style="margin-top:24px">
+    <legend>📝 แคปชั่น + แฮชแท็ก (ใช้ข้อมูลจากฟอร์มด้านบน)</legend>
+    <div class="row3">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);margin:0">
+        <input type="checkbox" class="platformCheck" value="tiktok" checked> TikTok</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);margin:0">
+        <input type="checkbox" class="platformCheck" value="facebook" checked> Facebook</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);margin:0">
+        <input type="checkbox" class="platformCheck" value="shopee" checked> Shopee</label>
+    </div>
+    <button type="button" id="captionBtn" style="margin-top:12px">📝 สร้างแคปชั่น + แฮชแท็ก</button>
+    <div id="captionResults" style="margin-top:14px"></div>
+  </fieldset>
+{% endblock %}
+{% block scripts %}
+<script>
+let refPath = "";
+
+document.getElementById("refFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("refStatus");
+  statusEl.textContent = "กำลังอัปโหลด...";
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch("/api/upload_reference", { method: "POST", body: fd });
+  const data = await res.json();
+  if (data.path) {
+    refPath = data.path;
+    statusEl.textContent = "อัปโหลดแล้ว: " + file.name;
+  } else {
+    statusEl.textContent = "อัปโหลดล้มเหลว: " + (data.error || "");
+  }
+});
+
+let characterManuallyPicked = false;
+
+function applyCharacterOption(select, opt, note) {
+  const infoEl = document.getElementById("characterInfo");
+  if (opt && opt.value) {
+    document.getElementById("presenterDescInput").value = opt.dataset.presenterDesc;
+    infoEl.textContent = opt.dataset.info + (note ? ` ${note}` : "");
+  } else {
+    infoEl.textContent = "";
+  }
+}
+
+(async function loadCharacters() {
+  try {
+    const res = await fetch("/api/characters");
+    const characters = await res.json();
+    const select = document.getElementById("characterSelect");
+    characters.forEach(c => {
+      const opt = document.createElement("option");
+      opt.value = c.id;
+      opt.textContent = `${c.name} (${c.gender === "male" ? "ชาย" : "หญิง"}, ${c.age_range}, ${c.style_archetype})`;
+      opt.dataset.presenterDesc = c.presenter_desc;
+      opt.dataset.info = `${c.appearance} เหมาะกับ: ${c.best_for}`;
+      select.appendChild(opt);
+    });
+    select.addEventListener("change", () => {
+      characterManuallyPicked = select.value !== "";
+      applyCharacterOption(select, select.selectedOptions[0]);
+    });
+  } catch (e) { /* silent - manual presenter_desc still works */ }
+})();
+
+document.getElementById("productNameInput").addEventListener("blur", async () => {
+  if (characterManuallyPicked) return; // don't override the user's own pick
+  const productName = document.getElementById("productNameInput").value.trim();
+  if (!productName) return;
+  const productVisualDesc = document.querySelector('[name="product_visual_desc"]').value;
+  try {
+    const res = await fetch("/api/suggest_character", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product_name: productName, product_visual_desc: productVisualDesc }),
+    });
+    const data = await res.json();
+    if (!data.character) return;
+    const select = document.getElementById("characterSelect");
+    select.value = data.character.id;
+    applyCharacterOption(select, select.selectedOptions[0], "(ระบบเลือกให้อัตโนมัติตามหมวดสินค้า — เปลี่ยนได้)");
+  } catch (e) { /* silent - manual pick still available */ }
+});
+
+let logoPath = "";
+
+document.getElementById("logoFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById("logoStatus");
+  statusEl.textContent = "กำลังอัปโหลด...";
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch("/api/upload_reference", { method: "POST", body: fd });
+  const data = await res.json();
+  if (data.path) {
+    logoPath = data.path;
+    statusEl.textContent = "อัปโหลดแล้ว: " + file.name;
+  } else {
+    statusEl.textContent = "อัปโหลดล้มเหลว: " + (data.error || "");
+  }
+});
+
+(async function loadFlowAccounts() {
+  try {
+    const res = await fetch("/api/flow_accounts");
+    const data = await res.json();
+    if (data.emails && data.emails.length > 1) {
+      const select = document.getElementById("accountSelect");
+      select.innerHTML = data.emails.map(e => `<option value="${e}">${e}</option>`).join("");
+      document.getElementById("accountFieldset").style.display = "block";
+    }
+  } catch (e) { /* silent - default account is used if this fails */ }
+})();
+
+function collectBrief() {
+  const form = document.getElementById("briefForm");
+  const fd = new FormData(form);
+  const brief = {};
+  for (const [k, v] of fd.entries()) brief[k] = v;
+  brief.reference_image = refPath;
+  brief.watermark_logo = logoPath;
+  return brief;
+}
+
+document.getElementById("createBtn").addEventListener("click", async () => {
+  const nameEl = document.querySelector('[name="product_name"]');
+  if (!nameEl.value.trim()) { alert("กรอกชื่อสินค้าก่อน"); return; }
+  if (!refPath) { alert("อัปโหลดรูปสินค้าก่อน"); return; }
+
+  const brief = collectBrief();
+  const res = await fetch("/api/preview", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(brief),
+  });
+  const data = await res.json();
+  if (data.error) { alert("Error: " + data.error); return; }
+
+  const container = document.getElementById("promptCards");
+  container.innerHTML = "";
+  data.segments.forEach(seg => {
+    const card = document.createElement("div");
+    card.className = "prompt-card";
+    card.innerHTML = `
+      <div class="head">
+        <label><input type="checkbox" class="segCheck" value="${seg.id}" checked> <span class="segid">${seg.id}</span></label>
+        <span class="badge">${seg.model} · ${seg.aspect_ratio} · ${seg.resolution} · ${seg.duration}s</span>
+      </div>
+      <div class="prompt-text">${seg.prompt}</div>
+    `;
+    container.appendChild(card);
+  });
+  document.getElementById("previewSection").style.display = "block";
+  document.getElementById("previewSection").scrollIntoView({ behavior: "smooth" });
+});
+
+document.getElementById("backBtn").addEventListener("click", () => {
+  document.getElementById("previewSection").style.display = "none";
+});
+
+document.getElementById("generateBtn").addEventListener("click", async () => {
+  const checked = [...document.querySelectorAll(".segCheck:checked")].map(c => c.value);
+  if (!checked.length) { alert("เลือกอย่างน้อย 1 segment"); return; }
+  if (!confirm(`ยืนยันสร้างจริง ${checked.length} segment? จะหักเครดิตทันที`)) return;
+
+  const brief = collectBrief();
+  document.getElementById("generateBtn").disabled = true;
+  const res = await fetch("/api/generate", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ brief, segment_ids: checked }),
+  });
+  const data = await res.json();
+  document.getElementById("generateBtn").disabled = false;
+  if (data.error) { alert("Error: " + data.error); return; }
+
+  const jobsSection = document.getElementById("jobsSection");
+  const jobCards = document.getElementById("jobCards");
+  jobsSection.style.display = "block";
+  jobsSection.scrollIntoView({ behavior: "smooth" });
+
+  const okResults = data.results.filter(r => !r.error);
+  const tracker = {
+    expected: okResults.length,
+    doneCount: 0,
+    files: new Array(okResults.length).fill(null),
+    category: brief.product_name,
+    productId: brief.product_id || null,
+  };
+
+  data.results.forEach((r, idx) => {
+    const card = document.createElement("div");
+    card.className = "job-card";
+    card.id = "job-" + (r.job_id || Math.random());
+    if (r.error) {
+      card.innerHTML = `<div><b>${r.segment_id}</b>: <span class="status-failed">ล้มเหลว - ${r.error}</span></div>`;
+      jobCards.appendChild(card);
+      return;
+    }
+    card.innerHTML = `
+      <div style="flex:1">
+        <div><b>${r.segment_id}</b></div>
+        <div class="status-pending" id="status-${r.job_id}">กำลังสร้าง...</div>
+      </div>
+    `;
+    jobCards.appendChild(card);
+    const slot = okResults.indexOf(r);
+    pollJob(r.job_id, slot, tracker);
+  });
+
+  loadStatus();
+});
+
+async function pollJob(jobId, slot, tracker) {
+  const statusEl = document.getElementById("status-" + jobId);
+  const cardEl = document.getElementById("job-" + jobId);
+  const tick = async () => {
+    const res = await fetch("/api/status/" + encodeURIComponent(jobId));
+    const data = await res.json();
+    if (data.status === "completed" && data.file_url) {
+      statusEl.textContent = "เสร็จแล้ว";
+      statusEl.className = "status-completed";
+      const video = document.createElement("video");
+      video.src = data.file_url;
+      video.controls = true;
+      cardEl.appendChild(video);
+      loadStatus();
+      if (tracker) {
+        tracker.files[slot] = data.file_url;
+        tracker.doneCount++;
+        if (tracker.doneCount === tracker.expected) checkAutoConcat(tracker);
+      }
+      return;
+    }
+    if (data.status === "failed") {
+      statusEl.textContent = "ล้มเหลว";
+      statusEl.className = "status-failed";
+      if (tracker) {
+        tracker.doneCount++;
+        if (tracker.doneCount === tracker.expected) checkAutoConcat(tracker);
+      }
+      return;
+    }
+    statusEl.textContent = "สถานะ: " + data.status + " ...";
+    setTimeout(tick, 8000);
+  };
+  tick();
+}
+
+async function checkAutoConcat(tracker) {
+  const files = tracker.files.filter(f => f);
+  if (files.length < 2) return; // need at least 2 successful segments to combine
+
+  const jobCards = document.getElementById("jobCards");
+  const combinedCard = document.createElement("div");
+  combinedCard.className = "job-card";
+  combinedCard.innerHTML = `<div style="flex:1"><div><b>คลิปรวม</b></div>
+    <div class="status-pending" id="concat-status">กำลังต่อ ${files.length} segment เป็นคลิปเดียว...</div></div>`;
+  jobCards.appendChild(combinedCard);
+
+  const res = await fetch("/api/concatenate", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file_urls: files, category: tracker.category, product_id: tracker.productId }),
+  });
+  const data = await res.json();
+  const statusEl = document.getElementById("concat-status");
+  if (data.error) {
+    statusEl.textContent = "ต่อคลิปล้มเหลว: " + data.error;
+    statusEl.className = "status-failed";
+    return;
+  }
+  statusEl.textContent = `เสร็จแล้ว (${data.duration}s)`;
+  statusEl.className = "status-completed";
+  const video = document.createElement("video");
+  video.src = data.file_url;
+  video.controls = true;
+  combinedCard.appendChild(video);
+}
+
+const PLATFORM_LABELS = { tiktok: "TikTok", facebook: "Facebook", shopee: "Shopee Video" };
+
+document.getElementById("captionBtn").addEventListener("click", async () => {
+  const platforms = [...document.querySelectorAll(".platformCheck:checked")].map(c => c.value);
+  if (!platforms.length) { alert("เลือกอย่างน้อย 1 แพลตฟอร์ม"); return; }
+
+  const brief = collectBrief();
+  const res = await fetch("/api/captions", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ brief, platforms }),
+  });
+  const data = await res.json();
+
+  const container = document.getElementById("captionResults");
+  container.innerHTML = "";
+  platforms.forEach(p => {
+    const block = data[p];
+    if (!block) return;
+    const section = document.createElement("div");
+    section.className = "prompt-card";
+    const capsHtml = block.captions.map((c, i) => `
+      <div style="margin-bottom:10px">
+        <b>แคปชั่น ${i + 1}:</b>
+        <div class="prompt-text" style="max-height:none;white-space:pre-wrap">${c.text}${c.hashtags.length ? "\n" + c.hashtags.join(" ") : ""}</div>
+        <button type="button" class="secondary copyBtn" data-text="${(c.text + (c.hashtags.length ? '\n' + c.hashtags.join(' ') : '')).replace(/"/g, '&quot;')}" style="margin-top:4px;padding:4px 10px;font-size:12px">คัดลอก</button>
+      </div>
+    `).join("");
+    section.innerHTML = `<div class="head"><span class="segid">${PLATFORM_LABELS[p] || p}</span></div>${capsHtml}`;
+    container.appendChild(section);
+  });
+  container.querySelectorAll(".copyBtn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      navigator.clipboard.writeText(btn.dataset.text);
+      btn.textContent = "คัดลอกแล้ว ✓";
+      setTimeout(() => { btn.textContent = "คัดลอก"; }, 1500);
+    });
+  });
+});
+</script>
+{% endblock %}

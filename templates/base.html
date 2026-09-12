@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}Flow Clip Studio{% endblock %}</title>
+<style>
+  :root {
+    --bg: #f6f5f3;
+    --bg-alt: #efeee9;
+    --panel: #ffffff;
+    --border: #e4e2dc;
+    --text: #2b2a27;
+    --muted: #8a877e;
+    --accent: #2f6f4e;
+    --accent-soft: #e7f2ec;
+    --danger: #c0392b;
+    --danger-soft: #fbe9e7;
+    --ok: #2f6f4e;
+    --warn: #b7791f;
+    --radius: 12px;
+    --sidebar-w: 220px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Noto Sans Thai", system-ui, sans-serif;
+    display: flex; min-height: 100vh;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* Sidebar */
+  .sidebar {
+    width: var(--sidebar-w); flex-shrink: 0; background: var(--panel);
+    border-right: 1px solid var(--border); padding: 20px 14px; position: sticky; top: 0;
+    height: 100vh; overflow-y: auto;
+  }
+  .brand { font-weight: 700; font-size: 15px; margin-bottom: 2px; display: flex; align-items: center; gap: 8px; }
+  .brand-sub { font-size: 11px; color: var(--muted); margin-bottom: 20px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px;
+    font-size: 13px; color: var(--text); margin-bottom: 2px;
+  }
+  .nav-item:hover { background: var(--bg-alt); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .nav-section { margin-top: 22px; font-size: 11px; color: var(--muted); text-transform: uppercase;
+                 letter-spacing: .04em; padding: 0 12px 6px; }
+
+  /* Main area */
+  .main { flex: 1; min-width: 0; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 28px; background: var(--panel); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 5;
+  }
+  .topbar h1 { font-size: 16px; margin: 0; }
+  .status-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .stat-pill {
+    display: flex; align-items: center; gap: 6px; background: var(--bg-alt); border: 1px solid var(--border);
+    border-radius: 999px; padding: 5px 12px; font-size: 12px; white-space: nowrap;
+  }
+  .stat-pill b { font-weight: 700; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .dot.on { background: var(--ok); }
+  .dot.off { background: #c9c6bc; }
+  .refresh-btn {
+    background: none; border: 1px solid var(--border); border-radius: 999px; padding: 5px 10px;
+    font-size: 12px; color: var(--muted); cursor: pointer;
+  }
+  .refresh-btn:hover { background: var(--bg-alt); }
+  .services-popover {
+    position: absolute; right: 28px; top: 58px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.08); padding: 12px; width: 260px;
+    display: none; z-index: 10;
+  }
+  .services-popover.open { display: block; }
+  .service-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 4px; font-size: 12px; }
+  .content { padding: 28px; max-width: 960px; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+  <div class="sidebar">
+    <div class="brand">🎬 Flow Clip Studio</div>
+    <div class="brand-sub">Co-worker Space · Local</div>
+
+    <div class="nav-item {% if active == 'create' %}active{% endif %}"><a href="/">✏️ สร้างคลิป</a></div>
+    <div class="nav-item {% if active == 'gallery' %}active{% endif %}"><a href="/gallery">🗂 คลังคลิปทั้งหมด</a></div>
+    <div class="nav-item {% if active == 'log' %}active{% endif %}"><a href="/log">📜 ประวัติการทำงาน</a></div>
+
+    <div class="nav-section">บัญชี: {{ session.username }}</div>
+    <div class="nav-item {% if active == 'settings' %}active{% endif %}"><a href="/settings">⚙️ ตั้งค่า API</a></div>
+    <div class="nav-item" id="sidebarServicesToggle" style="cursor:pointer">🔌 บริการที่เชื่อมต่อ</div>
+    <div class="nav-item"><a href="/logout">🚪 ออกจากระบบ</a></div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <h1>{% block page_title %}{% endblock %}</h1>
+      <div class="status-strip" id="statusStrip">
+        <span class="stat-pill">กำลังโหลดสถานะ...</span>
+      </div>
+    </div>
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+  <div class="services-popover" id="servicesPopover"></div>
+
+<script>
+async function loadStatus() {
+  try {
+    const res = await fetch("/api/account_status");
+    const data = await res.json();
+    const strip = document.getElementById("statusStrip");
+    const connectedCount = data.services.filter(s => s.connected).length;
+    let html = "";
+    if (data.flow_remaining_credits != null) {
+      html += `<span class="stat-pill">🎞️ Flow เครดิต: <b>${data.flow_remaining_credits.toLocaleString()}</b></span>`;
+    }
+    if (data.minimax_equity) {
+      html += `<span class="stat-pill">🎙️ Voice slots: <b>${data.minimax_equity.used}/${data.minimax_equity.total}</b></span>`;
+    }
+    html += `<span class="stat-pill" id="servicesPill" style="cursor:pointer">🔌 เชื่อมแล้ว: <b>${connectedCount}/${data.services.length}</b></span>`;
+    html += `<button class="refresh-btn" id="refreshBtn">↻ รีเฟรช</button>`;
+    strip.innerHTML = html;
+
+    const popover = document.getElementById("servicesPopover");
+    popover.innerHTML = data.services.map(s => `
+      <div class="service-row">
+        <span><span class="dot ${s.connected ? 'on' : 'off'}" style="display:inline-block;margin-right:6px;"></span>${s.name.replace(' API','')}</span>
+        <span style="color:var(--muted)">${s.connected ? s.accounts + ' บัญชี' : 'ยังไม่เชื่อม'}</span>
+      </div>
+    `).join("");
+
+    document.getElementById("refreshBtn").addEventListener("click", loadStatus);
+    document.getElementById("servicesPill").addEventListener("click", togglePopover);
+    document.getElementById("sidebarServicesToggle").addEventListener("click", togglePopover);
+  } catch (e) {
+    document.getElementById("statusStrip").innerHTML = '<span class="stat-pill">เชื่อมต่อไม่ได้</span>';
+  }
+}
+function togglePopover() {
+  document.getElementById("servicesPopover").classList.toggle("open");
+}
+document.addEventListener("click", (e) => {
+  const pop = document.getElementById("servicesPopover");
+  if (pop.classList.contains("open") && !pop.contains(e.target) &&
+      e.target.id !== "servicesPill" && e.target.id !== "sidebarServicesToggle") {
+    pop.classList.remove("open");
+  }
+});
+loadStatus();
+setInterval(loadStatus, 30000);
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

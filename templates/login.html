@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>เข้าสู่ระบบ - Flow Clip Studio</title>
+<style>
+  :root { --bg:#f6f5f3; --panel:#fff; --border:#e4e2dc; --text:#2b2a27; --muted:#8a877e; --accent:#2f6f4e; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"Segoe UI","Noto Sans Thai",system-ui,sans-serif;
+         display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:32px; width:340px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; }
+  input { width:100%; padding:9px 11px; border:1px solid var(--border); border-radius:8px; font-size:13px; box-sizing:border-box; }
+  button { width:100%; margin-top:18px; padding:11px; background:var(--accent); color:#fff; border:none;
+           border-radius:8px; font-size:14px; cursor:pointer; }
+  .flash { background:#fbe9e7; color:#c0392b; padding:8px 10px; border-radius:8px; font-size:12px; margin-bottom:12px; }
+  .alt { text-align:center; margin-top:16px; font-size:12px; color:var(--muted); }
+  .alt a { color:var(--accent); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🎬 Flow Clip Studio</h1>
+    <div class="sub">เข้าสู่ระบบ</div>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
+    {% endwith %}
+    <form method="post">
+      <label>ชื่อผู้ใช้</label>
+      <input type="text" name="username" required autofocus>
+      <label>รหัสผ่าน</label>
+      <input type="password" name="password" required>
+      <button type="submit">เข้าสู่ระบบ</button>
+    </form>
+    <div class="alt">ยังไม่มีบัญชี? <a href="/register">สมัครสมาชิก</a></div>
+  </div>
+</body>
+</html>
