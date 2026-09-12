@@ -590,17 +590,19 @@ def api_downloads():
     uid = current_user_id()
     outputs_dir = user_dir(uid) / "outputs"
     clips = db.list_clips(uid)
+    # Older clips (generated before product_link was required) may have no
+    # product_id at all - fall back to the same slugified-category key used
+    # elsewhere so a link can still be attached retroactively before export.
+    effective_ids = [clip.get("product_id") or slugify(clip.get("category") or "") for clip in clips]
+    briefs_by_id = db.get_briefs_bulk(uid, effective_ids)  # one query, not one per clip
+
     total_bytes = 0
     result = []
-    for clip in clips:
+    for clip, effective_product_id in zip(clips, effective_ids):
         path = outputs_dir / clip["file"]
         size = path.stat().st_size if path.exists() else 0
         total_bytes += size
-        # Older clips (generated before product_link was required) may have no
-        # product_id at all - fall back to the same slugified-category key used
-        # elsewhere so a link can still be attached retroactively before export.
-        effective_product_id = clip.get("product_id") or slugify(clip.get("category") or "")
-        brief = db.get_brief(uid, effective_product_id) if effective_product_id else None
+        brief = briefs_by_id.get(effective_product_id)
         result.append({**clip_view(clip, outputs_dir), "size_bytes": size,
                         "effective_product_id": effective_product_id,
                         "product_link": (brief or {}).get("product_link", "")})

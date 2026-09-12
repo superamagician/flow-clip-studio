@@ -18,6 +18,7 @@ from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 from cryptography.fernet import Fernet
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -51,18 +52,40 @@ def decrypt(ciphertext: str) -> str:
     return _FERNET.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
 
 
+_pool: psycopg2.pool.ThreadedConnectionPool | None = None
+
+
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _pool
+    if _pool is None:
+        database_url = os.environ.get("DATABASE_URL", "")
+        if not database_url:
+            raise RuntimeError(
+                "DATABASE_URL is not set. Point it at your Supabase Postgres connection "
+                "string (Project Settings -> Database -> Connection string -> URI).")
+        # Every call used to open a brand-new TCP+TLS+auth connection to Supabase
+        # from scratch - real, compounding latency on every page that makes more
+        # than one DB call (e.g. the downloads page listing many clips). A small
+        # pool reuses live connections across requests within this process instead.
+        _pool = psycopg2.pool.ThreadedConnectionPool(
+            1, 10, database_url, cursor_factory=psycopg2.extras.RealDictCursor)
+    return _pool
+
+
 @contextmanager
 def get_conn():
-    database_url = os.environ.get("DATABASE_URL", "")
-    if not database_url:
-        raise RuntimeError(
-            "DATABASE_URL is not set. Point it at your Supabase Postgres connection "
-            "string (Project Settings -> Database -> Connection string -> URI).")
-    conn = psycopg2.connect(database_url, cursor_factory=psycopg2.extras.RealDictCursor)
+    pool = _get_pool()
+    conn = pool.getconn()
+    ok = True
     try:
         yield conn
+    except Exception:
+        # The connection may be broken (e.g. Supabase's pooler dropped an idle
+        # one) - discard it instead of returning a bad connection to the pool.
+        ok = False
+        raise
     finally:
-        conn.close()
+        pool.putconn(conn, close=not ok)
 
 
 def init_db() -> None:
@@ -475,6 +498,19 @@ def get_brief(user_id: int, product_id: str) -> dict | None:
             (user_id, product_id))
         row = cur.fetchone()
         return json.loads(row["brief_json"]) if row else None
+
+
+def get_briefs_bulk(user_id: int, product_ids: list[str]) -> dict[str, dict]:
+    """Fetch many briefs in one round trip instead of one query per product_id -
+    used by the downloads page, which otherwise did one get_brief() call per clip."""
+    unique_ids = list({pid for pid in product_ids if pid})
+    if not unique_ids:
+        return {}
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT product_id, brief_json FROM briefs WHERE user_id = %s AND product_id = ANY(%s)",
+            (user_id, unique_ids))
+        return {r["product_id"]: json.loads(r["brief_json"]) for r in cur.fetchall()}
 
 
 def set_brief_field(user_id: int, product_id: str, field: str, value, category: str = "") -> None:
