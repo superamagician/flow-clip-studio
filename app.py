@@ -948,10 +948,11 @@ def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[
             db.set_pending_job(jid, uid, category, segment_label, row_variant, watermark,
                                 brief.get("product_id", ""))
             db.log_event(uid, "job_submitted", job_id=jid, segment_id=row["id"], category=category)
-            results.append({"segment_id": row["id"], "job_id": jid, "status": "submitted"})
+            results.append({"segment_id": row["id"], "job_id": jid, "status": "submitted",
+                             "product_id": brief.get("product_id", "")})
         except Exception as exc:  # noqa: BLE001
             db.log_event(uid, "job_submit_failed", segment_id=row["id"], category=category, error=str(exc))
-            results.append({"segment_id": row["id"], "error": str(exc)})
+            results.append({"segment_id": row["id"], "error": str(exc), "product_id": brief.get("product_id", "")})
     return results
 
 
@@ -975,6 +976,37 @@ def api_generate():
         return jsonify({"error": str(exc)}), 400
 
     return jsonify({"results": results})
+
+
+@app.route("/api/retry_segment", methods=["POST"])
+@login_required
+def api_retry_segment():
+    """Re-submit exactly one previously-failed segment, using the same brief that
+    was used the first time (looked up by product_id from the briefs table, saved
+    on every submit_brief_segments() call) - so a single flaky segment doesn't
+    require redoing the whole product or retyping the brief from scratch."""
+    uid = current_user_id()
+    payload = request.get_json(force=True) or {}
+    segment_id = (payload.get("segment_id") or "").strip()
+    product_id = (payload.get("product_id") or "").strip()
+    if not segment_id or not product_id:
+        return jsonify({"error": "ข้อมูลไม่ครบสำหรับลองใหม่"}), 400
+
+    brief = db.get_brief(uid, product_id)
+    if not brief:
+        return jsonify({"error": "ไม่พบข้อมูลสินค้าเดิม (อาจสร้างมานานแล้ว) ลองสร้างใหม่จากฟอร์มแทน"}), 404
+
+    client = get_client(uid)
+    if not client.token:
+        return jsonify({"error": "ยังไม่ได้ตั้งค่า USEAPI_TOKEN — ไปที่หน้า ตั้งค่า ก่อน"}), 400
+
+    try:
+        results = submit_brief_segments(uid, brief, {segment_id})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 400
+    if not results:
+        return jsonify({"error": f"ไม่พบ segment {segment_id} ในสินค้านี้ (อาจเปลี่ยนแนวคลิปไปแล้ว)"}), 404
+    return jsonify({"result": results[0]})
 
 
 # ---------------------------------------------------------------------------

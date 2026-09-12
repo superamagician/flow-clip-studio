@@ -447,8 +447,14 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
     card.className = "job-card";
     card.id = "job-" + (r.job_id || Math.random());
     if (r.error) {
-      card.innerHTML = `<div><b>${r.segment_id}</b>: <span class="status-failed">ล้มเหลว - ${r.error}</span></div>`;
+      card.innerHTML = `
+        <div style="flex:1">
+          <div><b>${r.segment_id}</b>: <span class="status-failed">ล้มเหลว - ${r.error}</span></div>
+        </div>
+        <button type="button" class="secondary retryBtn" data-segment="${r.segment_id}">🔄 ลองใหม่</button>
+      `;
       jobCards.appendChild(card);
+      card.querySelector(".retryBtn").addEventListener("click", (e) => retrySegment(r.segment_id, r.product_id, card, e.target));
       return;
     }
     card.innerHTML = `
@@ -459,13 +465,13 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
     `;
     jobCards.appendChild(card);
     const slot = okResults.indexOf(r);
-    pollJob(r.job_id, slot, tracker);
+    pollJob(r.job_id, slot, tracker, r.segment_id, r.product_id);
   });
 
   loadStatus();
 });
 
-async function pollJob(jobId, slot, tracker) {
+async function pollJob(jobId, slot, tracker, segmentId, productId) {
   const statusEl = document.getElementById("status-" + jobId);
   const cardEl = document.getElementById("job-" + jobId);
   let errorStreak = 0;
@@ -503,6 +509,14 @@ async function pollJob(jobId, slot, tracker) {
     if (data.status === "failed") {
       statusEl.textContent = "ล้มเหลว";
       statusEl.className = "status-failed";
+      if (segmentId && cardEl && !cardEl.querySelector(".retryBtn")) {
+        const retryBtn = document.createElement("button");
+        retryBtn.type = "button";
+        retryBtn.className = "secondary retryBtn";
+        retryBtn.textContent = "🔄 ลองใหม่";
+        retryBtn.addEventListener("click", () => retrySegment(segmentId, productId, cardEl, retryBtn));
+        cardEl.appendChild(retryBtn);
+      }
       if (tracker) {
         tracker.doneCount++;
         if (tracker.doneCount === tracker.expected) checkAutoConcat(tracker);
@@ -513,6 +527,40 @@ async function pollJob(jobId, slot, tracker) {
     setTimeout(tick, 8000);
   };
   tick();
+}
+
+async function retrySegment(segmentId, productId, cardEl, btnEl) {
+  btnEl.disabled = true;
+  btnEl.textContent = "⏳ กำลังลองใหม่...";
+  let data;
+  try {
+    const res = await fetch("/api/retry_segment", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ segment_id: segmentId, product_id: productId }),
+    });
+    data = await res.json();
+  } catch (e) {
+    alert("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง");
+    btnEl.disabled = false;
+    btnEl.textContent = "🔄 ลองใหม่";
+    return;
+  }
+  const result = data.result;
+  if (data.error || !result || result.error) {
+    alert("ลองใหม่ไม่สำเร็จ: " + (data.error || (result && result.error) || "ไม่ทราบสาเหตุ"));
+    btnEl.disabled = false;
+    btnEl.textContent = "🔄 ลองใหม่";
+    return;
+  }
+  cardEl.id = "job-" + result.job_id;
+  cardEl.innerHTML = `
+    <div style="flex:1">
+      <div><b>${result.segment_id}</b></div>
+      <div class="status-pending" id="status-${result.job_id}">กำลังสร้าง...</div>
+    </div>
+  `;
+  pollJob(result.job_id, null, null, result.segment_id, result.product_id);
+  loadStatus();
 }
 
 async function checkAutoConcat(tracker) {
