@@ -84,6 +84,13 @@ def generate_copy(product_name: str, product_visual_desc: str = "") -> dict | No
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read().decode("utf-8"))
         text = result["content"][0]["text"].strip()
+        # The model sometimes wraps its JSON in a ```json ... ``` fence despite being
+        # told not to - strip that before parsing rather than failing on it.
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
         data = json.loads(text)
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
             KeyError, IndexError, json.JSONDecodeError, ValueError):
