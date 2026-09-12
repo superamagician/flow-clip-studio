@@ -1,7 +1,10 @@
 # Render Blueprint - https://render.com/docs/blueprint-spec
 # In Render: New -> Blueprint -> connect this GitHub repo -> it reads this file.
 # You still set the secret env vars yourself in the Render dashboard (never commit them):
-#   DATABASE_URL   - Supabase Project Settings -> Database -> Connection string -> URI
+#   DATABASE_URL   - Supabase "Connect" button -> Transaction pooler (NOT Direct connection -
+#                    the direct hostname resolves to IPv6, which Render can't reach; the pooler
+#                    hostname is IPv4). Format:
+#                    postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
 #   MASTER_KEY     - a Fernet key: generate locally with
 #                    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 #                    (reusing an existing .master.key's content keeps existing encrypted rows readable)
