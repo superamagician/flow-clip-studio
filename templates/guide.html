@@ -13,61 +13,188 @@
   .guide-section .warn { background: var(--danger-soft); color: var(--danger); border-radius: 8px;
                           padding: 8px 12px; font-size: 12.5px; margin-top: 8px; }
   code { background: var(--bg-alt); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+  .example { background: var(--bg-alt); border: 1px dashed var(--border); border-radius: 8px;
+             padding: 10px 14px; margin-top: 10px; font-size: 12.5px; }
+  .example .ex-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+                        letter-spacing: .04em; margin-bottom: 6px; }
+  .example pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 12.5px; }
+  .example table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .example th, .example td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+  .example th { color: var(--muted); font-weight: 600; }
+  .toc { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+  .toc a { font-size: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px;
+           padding: 5px 12px; color: var(--text); }
+  .toc a:hover { background: var(--bg-alt); }
+  .flow-steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12.5px; }
+  .flow-steps .step { background: var(--accent-soft); color: var(--accent); border-radius: 8px; padding: 6px 12px; }
+  .flow-steps .arrow { color: var(--muted); }
 </style>
 {% endblock %}
 {% block content %}
-  <div class="guide-section">
-    <h3>✏️ สร้างคลิป</h3>
+  <div class="toc">
+    <a href="#overview">ภาพรวม</a>
+    <a href="#search">ค้นหาสินค้า</a>
+    <a href="#create">สร้างคลิปเดี่ยว</a>
+    <a href="#batch">สร้างแบบ Batch</a>
+    <a href="#genres">หลายแนวพร้อมกัน</a>
+    <a href="#characters">ตัวละคร</a>
+    <a href="#watermark">ลายน้ำ</a>
+    <a href="#captions">แคปชั่น+ลิงก์</a>
+    <a href="#gallery">คลังคลิป</a>
+    <a href="#downloads">ดาวน์โหลด+Shopee Pack</a>
+    <a href="#reports">รายงานผลงาน</a>
+    <a href="#log">ประวัติ</a>
+    <a href="#settings">ตั้งค่า API</a>
+    <a href="#faq">แก้ปัญหาที่พบบ่อย</a>
+  </div>
+
+  <div class="guide-section" id="overview">
+    <h3>🗺 ภาพรวมลำดับการทำงาน</h3>
+    <div class="flow-steps">
+      <span class="step">1. หาสินค้า</span><span class="arrow">→</span>
+      <span class="step">2. สร้างคลิป</span><span class="arrow">→</span>
+      <span class="step">3. แคปชั่น</span><span class="arrow">→</span>
+      <span class="step">4. ดาวน์โหลด/Shopee Pack</span><span class="arrow">→</span>
+      <span class="step">5. อัปขึ้น Shopee/TikTok</span>
+    </div>
+    <p style="margin-top:10px">ใช้เมนูซ้ายไล่ตามลำดับนี้ได้เลย แต่ละหน้าเชื่อมข้อมูลกันอัตโนมัติ (ใส่ครั้งเดียว ใช้ได้ทุกที่)</p>
+  </div>
+
+  <div class="guide-section" id="search">
+    <h3>🔍 ค้นหาสินค้า</h3>
+    <p>เมนูบนสุดซ้าย "🔍 ค้นหาสินค้า (Shoptool)" เปิดเว็บ shoptool.app ในแท็บใหม่ (ใช้บัญชี/license ของคุณเอง) สำหรับหาสินค้าที่กำลังขายดี/มีค่าคอมสูงมาทำคลิปต่อ</p>
+    <div class="note">เจอสินค้าที่สนใจแล้ว กลับมาที่แท็บนี้ กด "สร้างคลิป" แล้วกรอกข้อมูลตามปกติ (ยังไม่มีการส่งข้อมูลข้ามระบบอัตโนมัติ)</div>
+  </div>
+
+  <div class="guide-section" id="create">
+    <h3>✏️ สร้างคลิปเดี่ยว</h3>
     <ol>
-      <li>อัปโหลด <b>รูปสินค้า</b> — ต้องเป็นรูปสินค้าล้วนๆ พื้นหลังเรียบ <b>ห้ามใช้รูปจากหน้า listing ที่มีแบนเนอร์โลโก้ ตรา "No.1" แถบไอคอนฟีเจอร์ หรือป้ายลดราคาปนอยู่</b> (พบมาแล้วว่าทำให้ AI สับสนและวาดสินค้าไม่ตรงปก) ต้องครอปกราฟิกพวกนี้ออกก่อนเสมอ</li>
-      <li>ใส่ <b>ลิงก์สินค้า</b> (Shopee/TikTok Shop/Lazada) — <b>บังคับใส่ทุกครั้ง</b> กดสร้างคลิปไม่ได้ถ้ายังไม่ใส่ ใช้สำหรับปักตะกร้าและแนบในแคปชั่นอัตโนมัติ</li>
-      <li>ตั้ง <b>ชื่อสินค้า</b> — ระบบจะเลือกตัวละครพรีเซนเตอร์ให้อัตโนมัติตามหมวดสินค้าที่พิมพ์</li>
-      <li>เลือก <b>แนวคลิป (genre)</b>: <code>hook_feature_cta</code> (สไตล์ทั่วไป มีคนพูด), <code>asmr</code> (ไม่มีคนพูด เน้นเสียง/สัมผัส), <code>pov</code> (มุมมองคนดูเอง), <code>minimal</code> (เรียบหรู) — ติ๊กเลือกได้มากกว่า 1 แนวพร้อมกัน ระบบจะสร้างครบทุกแนวที่เลือกจากสินค้าเดียวกัน (หักเครดิตเพิ่มตามจำนวนแนวที่เลือก)</li>
-      <li>กด <b>สร้างคลิปโฆษณา</b> → ระบบจะโชว์พรอมต์ที่แต่งให้ก่อน (ยังไม่หักเครดิต) ตรวจดูแล้วกด <b>ยืนยันสร้างจริง</b></li>
-      <li>ถ้าเลือกสร้างครบ 3 segment (A+B+C) ระบบจะ<b>ต่อเป็นคลิปเดียว 30 วิให้อัตโนมัติ</b>หลังสร้างเสร็จ</li>
+      <li>อัปโหลด <b>รูปสินค้า</b> — ต้องเป็นรูปสินค้าล้วนๆ พื้นหลังเรียบ <b>ห้ามใช้รูปจากหน้า listing ที่มีแบนเนอร์โลโก้ ตรา "No.1" แถบไอคอนฟีเจอร์ หรือป้ายลดราคาปนอยู่</b> ต้องครอปกราฟิกพวกนี้ออกก่อนเสมอ ไม่งั้น AI จะวาดสินค้าไม่ตรงปก</li>
+      <li>ใส่ <b>ลิงก์สินค้า</b> (Shopee/TikTok Shop/Lazada) — <b>บังคับ</b> กดสร้างคลิปไม่ได้ถ้ายังไม่ใส่ ใช้ปักตะกร้า+แนบแคปชั่นอัตโนมัติ</li>
+      <li>ตั้ง <b>ชื่อสินค้า</b> — ระบบเลือกตัวละครพรีเซนเตอร์ให้อัตโนมัติตามหมวดสินค้าที่พิมพ์ + ให้ AI แต่งคำโฆษณา (hook/feature/CTA) ให้ตรงสินค้าถ้าไม่กรอกเอง</li>
+      <li>เลือก <b>แนวคลิป (genre)</b> อย่างน้อย 1 แนว</li>
+      <li>กด <b>สร้างคลิปโฆษณา</b> → รอสักครู่ (สินค้าใหม่ AI แต่งคำใช้เวลา ~5-15 วิ ปุ่มจะขึ้น "กำลังแต่งคำโฆษณา...") → ระบบโชว์พรอมต์ที่แต่งให้ก่อน (ยังไม่หักเครดิต)</li>
+      <li>ตรวจพรอมต์แล้วกด <b>ยืนยันสร้างจริง</b> — ตอนนี้หักเครดิตแล้ว</li>
+      <li>สร้างครบ 3 segment (A+B+C) ระบบจะ<b>ต่อเป็นคลิปเดียวให้อัตโนมัติ</b>หลังสร้างเสร็จ</li>
     </ol>
-    <div class="note">เปิด "ปรับแต่งเพิ่มเติม" เพื่อกรอก hook/feature/CTA เอง, เลือกตัวละครจากคลัง, ใส่ลายน้ำ/โลโก้กันก๊อบปี้</div>
+    <div class="example">
+      <div class="ex-label">ตัวอย่างข้อมูลที่กรอก</div>
+      <table>
+        <tr><th>ชื่อสินค้า</th><td>Bewell Cooling Blanket ผ้าห่มเย็นอัจฉริยะ</td></tr>
+        <tr><th>ลิงก์สินค้า</th><td>https://shopee.co.th/product/39233325/27005518392</td></tr>
+        <tr><th>แนวคลิป</th><td>hook_feature_cta</td></tr>
+      </table>
+      <div class="ex-label" style="margin-top:8px">AI แต่งคำให้อัตโนมัติ (ไม่กรอกเองก็ได้)</div>
+      <pre>hook_line_1: "ร้อนจนนอนไม่หลับ?"
+feature_tag_1: "เย็นทันทีที่สัมผัส ระบายความร้อนได้ทั้งคืน"
+cta_text: "กดตะกร้าเลย"</pre>
+    </div>
+    <div class="note">เปิด "ปรับแต่งเพิ่มเติม" เพื่อกรอก hook/feature/CTA เอง, เลือกตัวละครจากคลัง, ใส่ลายน้ำ/โลโก้, หรือ<b>เลือกจากสินค้าที่เคยสร้างไว้</b>เพื่อดึงข้อมูลเก่ากลับมาใช้ (ไม่ต้องพิมพ์ซ้ำ)</div>
   </div>
 
-  <div class="guide-section">
+  <div class="guide-section" id="batch">
+    <h3>📦 สร้างแบบ Batch (หลายสินค้าในรอบเดียว)</h3>
+    <ol>
+      <li>ไปหน้า "สร้างแบบ Batch" → ดาวน์โหลด Template CSV</li>
+      <li>กรอกข้อมูลสินค้าแต่ละแถว (แถวละ 1 สินค้า) สูงสุด 30 สินค้าต่อรอบ</li>
+      <li>ตั้งชื่อไฟล์รูปให้ตรงกับคอลัมน์ <code>reference_image_filename</code> แล้วอัปโหลดรูปทั้งหมดพร้อมกัน</li>
+      <li>กด <b>Preview</b> (ฟรี ไม่หักเครดิต) → ตรวจจำนวนสินค้า/คลิปที่จะสร้าง</li>
+      <li>กด <b>ยืนยันสร้างจริงทั้งหมด</b> — สินค้าใหม่หลายชิ้นอาจใช้เวลาสร้างพรอมต์หลายสิบวินาที (AI แต่งคำให้ทีละสินค้า)</li>
+    </ol>
+    <div class="example">
+      <div class="ex-label">ตัวอย่างแถวใน Template CSV</div>
+      <table>
+        <tr><th>product_id</th><td>my_product_01</td></tr>
+        <tr><th>product_name</th><td>หูฟังเกมมิ่ง XYZ</td></tr>
+        <tr><th>product_link</th><td>https://shopee.co.th/product/...</td></tr>
+        <tr><th>genre</th><td>hook_feature_cta</td></tr>
+        <tr><th>reference_image_filename</th><td>my_product_01.jpg</td></tr>
+      </table>
+    </div>
+    <div class="warn">คอลัมน์ <code>product_link</code> เป็น<b>ค่าบังคับทุกแถว</b> — ถ้าแถวไหนไม่ใส่ ระบบจะไม่ให้สร้างทั้งไฟล์ และจะบอกเลขแถวที่ขาดให้</div>
+  </div>
+
+  <div class="guide-section" id="genres">
+    <h3>🎬 สร้างหลายแนวคลิปพร้อมกัน (ไม่บังคับ)</h3>
+    <p>ทั้งหน้าสร้างเดี่ยว (ติ๊กเลือกได้หลายแนว) และ Batch CSV (คอลัมน์ <code>genres</code> คั่นด้วยจุลภาค) รองรับการสร้างหลายสไตล์จากสินค้าเดียวกันในรอบเดียว เหมาะกับการทดสอบว่าแนวไหนขายดีกว่า</p>
+    <div class="example">
+      <div class="ex-label">ตัวอย่าง</div>
+      <pre>เลือกแนว: hook_feature_cta + asmr
+ผลลัพธ์: 2 แนว × 3 segment = 6 คลิป (หักเครดิตตามจำนวนนี้)</pre>
+    </div>
+    <div class="warn">หักเครดิตเพิ่มตามจำนวนแนวที่เลือกจริง — เช็คตัวเลขที่ระบบโชว์ก่อนกดยืนยันเสมอ</div>
+  </div>
+
+  <div class="guide-section" id="characters">
     <h3>🎭 ตัวละคร (พรีเซนเตอร์)</h3>
-    <p>ระบบมีตัวละครสำเร็จรูป 6 คน (คลิกเลือกได้ในหน้าสร้างคลิป) แต่ละคนออกแบบให้เหมาะกับสินค้าคนละแบบ พิมพ์ชื่อสินค้าแล้วออกจากช่อง ระบบจะเลือกให้อัตโนมัติ — ยังเปลี่ยนเองได้เสมอ</p>
+    <p>ระบบมีตัวละครสำเร็จรูปให้เลือกในหน้าสร้างคลิป แต่ละคนออกแบบให้เหมาะกับสินค้าคนละแบบ พิมพ์ชื่อสินค้าแล้วออกจากช่อง ระบบจะเลือกให้อัตโนมัติตามหมวดสินค้า — ยังเปลี่ยนเองได้เสมอ</p>
   </div>
 
-  <div class="guide-section">
+  <div class="guide-section" id="watermark">
     <h3>🔖 ลายน้ำ / โลโก้กันก๊อบปี้</h3>
     <p>ใส่ข้อความหรืออัปโหลดโลโก้ในส่วน "ปรับแต่งเพิ่มเติม" เลือกตำแหน่งและความโปร่งใสได้ ระบบจะเบิร์นทับคลิปทุก segment ให้อัตโนมัติหลังสร้างเสร็จ (ไม่ต้องทำเอง)</p>
   </div>
 
-  <div class="guide-section">
-    <h3>📝 แคปชั่น + แฮชแท็ก</h3>
-    <p>หลังกรอกข้อมูลสินค้าในหน้าสร้างคลิป เลื่อนลงไปที่ส่วน "แคปชั่น + แฮชแท็ก" เลือกแพลตฟอร์ม (TikTok/Facebook/Shopee) แล้วกดสร้าง — ได้ข้อความพร้อมคัดลอกไปโพสต์ทันที</p>
+  <div class="guide-section" id="captions">
+    <h3>📝 แคปชั่น + แฮชแท็ก + ลิงก์สินค้า</h3>
+    <p>หลังกรอกข้อมูลสินค้า เลื่อนลงไปที่ส่วน "แคปชั่น + แฮชแท็ก" เลือกแพลตฟอร์ม (TikTok/Facebook/Shopee) แล้วกดสร้าง — ถ้าใส่ลิงก์สินค้าไว้ จะแนบต่อท้ายให้อัตโนมัติทุกแคปชั่น พร้อมคัดลอกไปโพสต์/ปักตะกร้าได้เลย</p>
+    <div class="example">
+      <div class="ex-label">ตัวอย่างแคปชั่นที่ได้ (Shopee)</div>
+      <pre>Bewell Cooling Blanket ผ้าห่มเย็นอัจฉริยะ 🔥 เย็นทันทีที่สัมผัส + ระบายความร้อนตลอดคืน
+กดตะกร้าด้านล่างเลย ของมีจำนวนจำกัด
+
+#shopeeTH #เย็นทันทีที่สัมผัส
+🔗 https://shopee.co.th/product/39233325/27005518392</pre>
+    </div>
+    <div class="note">มีสินค้าที่เคยสร้างไว้แล้ว? ใช้ dropdown "สร้างย้อนหลังจากสินค้าที่เคยสร้างไว้" เหนือส่วนแคปชั่น เพื่อดึงข้อมูลเก่ากลับมาสร้างแคปชั่นได้โดยไม่ต้องพิมพ์ใหม่ (ใช้ได้กับสินค้าที่สร้างหลังฟีเจอร์นี้เปิดใช้งาน)</div>
   </div>
 
-  <div class="guide-section">
+  <div class="guide-section" id="gallery">
     <h3>🗂 คลังคลิปทั้งหมด</h3>
     <p>ดูคลิปทั้งหมดที่เคยสร้าง แยกแท็บตามสินค้า เล่นดูได้ในหน้าเว็บโดยตรง</p>
   </div>
 
-  <div class="guide-section">
-    <h3>⬇️ จัดการไฟล์ดาวน์โหลด</h3>
-    <p>ดูขนาดไฟล์แต่ละคลิป + พื้นที่ใช้ทั้งหมด, ดาวน์โหลดไฟล์ลงเครื่อง, หรือลบไฟล์ที่ไม่ใช้แล้วเพื่อประหยัดพื้นที่</p>
-    <div class="warn">การลบไฟล์เป็นการลบถาวร กู้คืนไม่ได้</div>
+  <div class="guide-section" id="downloads">
+    <h3>⬇️ จัดการไฟล์ดาวน์โหลด + Shopee Pack</h3>
+    <p>ดูขนาดไฟล์แต่ละคลิป + พื้นที่ใช้ทั้งหมด, ดาวน์โหลดไฟล์ลงเครื่อง, หรือลบไฟล์ที่ไม่ใช้แล้ว</p>
+    <ul>
+      <li><b>เลือกทั้งหมด/บางส่วน + ดาวน์โหลดเป็น ZIP</b> — รวมหลายคลิปเป็นไฟล์เดียวโหลดทีเดียว</li>
+      <li><b>🛒 Shopee Pack</b> — จับคู่ไฟล์วิดีโอกับข้อมูลสินค้า+แคปชั่นเป็นไฟล์ <code>.json</code> ชื่อเดียวกันกับวิดีโอ พร้อมอัปโหลดขึ้นเครื่องมือ Shopee bulk upload ได้เลย</li>
+    </ul>
+    <div class="example">
+      <div class="ex-label">ตัวอย่างไฟล์ที่ได้จาก Shopee Pack</div>
+      <pre>📁 shopee_pack.zip
+ ├─ bewell_cooling_a.mp4
+ ├─ bewell_cooling_a.json   ← {"title": "...", "product_link": "...", "caption": "...", "video_filename": "bewell_cooling_a.mp4"}
+ ├─ bewell_cooling_b.mp4
+ └─ bewell_cooling_b.json</pre>
+    </div>
+    <div class="warn">Shopee Pack ใช้ได้กับ<b>คลิปที่สร้างหลังฟีเจอร์นี้เปิดใช้งานเท่านั้น</b> — คลิปเก่าก่อนหน้าจะได้แค่ชื่อสินค้า ไม่มีลิงก์/แคปชั่นแนบมาด้วย เพราะไม่มีข้อมูลผูกไว้<br>การลบไฟล์เป็นการลบถาวร กู้คืนไม่ได้ และไฟล์จะถูกลบอัตโนมัติเมื่อเก่าเกินกำหนด (ดูข้อความแจ้งเตือนในหน้านี้) — ดาวน์โหลดเก็บไว้ก่อนถ้ายังต้องใช้</div>
   </div>
 
-  <div class="guide-section">
+  <div class="guide-section" id="reports">
     <h3>📊 รายงานผลงาน</h3>
-    <p>สรุปจำนวนคลิป, ความยาวรวม, อัตราความสำเร็จของงานที่ส่งไปสร้าง, แยกตามสินค้าและตามวัน</p>
+    <p>สรุปเครดิตคงเหลือ, จำนวนคลิปทั้งหมด, เวลาเฉลี่ยต่อคลิป, ความยาวรวม, อัตราความสำเร็จของงานที่ส่งไปสร้าง แยกตามสินค้าและตามวัน</p>
   </div>
 
-  <div class="guide-section">
+  <div class="guide-section" id="log">
     <h3>📜 ประวัติการทำงาน</h3>
     <p>บันทึกทุกครั้งที่ preview / สั่งสร้างคลิป / งานเสร็จ-ล้มเหลว / ต่อคลิป — ใช้ตรวจสอบย้อนหลังได้ว่าเกิดอะไรขึ้นบ้าง</p>
   </div>
 
-  <div class="guide-section">
+  <div class="guide-section" id="settings">
     <h3>⚙️ ตั้งค่า API</h3>
     <p>ใส่ <code>USEAPI_TOKEN</code> ของตัวเอง (จาก useapi.net) และอีเมล Google Flow ที่เชื่อมไว้ — ข้อมูลถูกเข้ารหัสก่อนบันทึก เห็นได้เฉพาะบัญชีของคุณเท่านั้น ไม่ปนกับผู้ใช้คนอื่น</p>
     <div class="warn">ไม่มี USEAPI_TOKEN จะสร้างคลิปจริงไม่ได้ (Preview ยังใช้ได้ปกติเพราะไม่เสียเครดิต)</div>
+  </div>
+
+  <div class="guide-section" id="faq">
+    <h3>❓ แก้ปัญหาที่พบบ่อย</h3>
+    <ul>
+      <li><b>สินค้าในคลิปหน้าตาเพี้ยน ไม่ตรงปก</b> — ตรวจรูปที่อัปโหลดว่ามีแบนเนอร์/ตรา/ไอคอนปนอยู่ไหม (ดูหัวข้อ "สร้างคลิปเดี่ยว" ด้านบน) ครอปให้เหลือสินค้าล้วนๆ แล้วลองใหม่</li>
+      <li><b>กดปุ่มแล้วดูเหมือนค้าง ไม่มีอะไรเกิดขึ้น</b> — ระบบกำลังทำงานอยู่เบื้องหลัง (โดยเฉพาะสินค้าใหม่ที่ต้องให้ AI แต่งคำ) ปุ่มจะขึ้นข้อความ "กำลัง..." ระหว่างรอ ปกติไม่เกิน 15-30 วินาที</li>
+      <li><b>คลิปเก่าหายไปจากคลัง</b> — คลิปที่เก็บไว้นานเกินกำหนดจะถูกลบอัตโนมัติ (ดูจำนวนวันที่หน้าจัดการไฟล์ดาวน์โหลด) ดาวน์โหลดเก็บไว้ก่อนถ้ายังต้องใช้</li>
+      <li><b>เครดิตในหัวเว็บโชว์ว่างเปล่า</b> — จะกลับมาโชว์เองหลังสร้าง/เช็คสถานะคลิปครั้งถัดไป</li>
+    </ul>
   </div>
 {% endblock %}
