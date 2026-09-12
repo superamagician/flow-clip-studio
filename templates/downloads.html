@@ -26,10 +26,12 @@
 {% endblock %}
 {% block content %}
   <div class="summary-bar" id="summaryBar"></div>
-  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;flex-wrap:wrap">
     <button type="button" class="btn" id="zipBtn">📦 ดาวน์โหลดที่เลือกเป็น ZIP</button>
+    <button type="button" class="btn btn-accent" id="shopeePackBtn">🛒 Shopee Pack (mp4 + json คู่กัน)</button>
     <span id="selectedCount" style="font-size:12.5px;color:var(--muted)"></span>
   </div>
+  <div style="font-size:12.5px;color:var(--muted);margin-bottom:12px">Shopee Pack: จับคู่ไฟล์วิดีโอกับข้อมูลสินค้า+แคปชั่นเป็น .json ชื่อไฟล์เดียวกัน (ใช้ชื่อสินค้า/ลิงก์/แคปชั่นจากตอนสร้างคลิป — ต้องใส่ "ลิงก์สินค้า" ไว้ตอนสร้างคลิปด้วยถึงจะมีลิงก์ในไฟล์)</div>
   <div id="tableWrap"></div>
 {% endblock %}
 {% block scripts %}
@@ -97,15 +99,15 @@
     document.getElementById("selectedCount").textContent = n ? `เลือกไว้ ${n} ไฟล์` : "";
   }
 
-  document.getElementById("zipBtn").addEventListener("click", async () => {
+  async function downloadZipFrom(endpoint, btnId, busyText, idleText, filename) {
     const ids = [...document.querySelectorAll(".clipCheck:checked")].map(c => parseInt(c.value, 10));
     if (!ids.length) { alert("เลือกไฟล์อย่างน้อย 1 ไฟล์ก่อน"); return; }
 
-    const btn = document.getElementById("zipBtn");
+    const btn = document.getElementById(btnId);
     btn.disabled = true;
-    btn.textContent = "กำลังรวมไฟล์...";
+    btn.textContent = busyText;
     try {
-      const res = await fetch("/api/downloads/zip", {
+      const res = await fetch(endpoint, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clip_ids: ids }),
       });
@@ -118,16 +120,24 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `clips_${ids.length}.zip`;
+      a.download = filename(ids.length);
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     } finally {
       btn.disabled = false;
-      btn.textContent = "📦 ดาวน์โหลดที่เลือกเป็น ZIP";
+      btn.textContent = idleText;
     }
-  });
+  }
+
+  document.getElementById("zipBtn").addEventListener("click", () => downloadZipFrom(
+    "/api/downloads/zip", "zipBtn", "กำลังรวมไฟล์...",
+    "📦 ดาวน์โหลดที่เลือกเป็น ZIP", n => `clips_${n}.zip`));
+
+  document.getElementById("shopeePackBtn").addEventListener("click", () => downloadZipFrom(
+    "/api/downloads/shopee_pack", "shopeePackBtn", "กำลังจับคู่ไฟล์...",
+    "🛒 Shopee Pack (mp4 + json คู่กัน)", n => `shopee_pack_${n}.zip`));
 
   async function deleteClip(id) {
     if (!confirm("ลบไฟล์นี้ถาวร? กู้คืนไม่ได้")) return;

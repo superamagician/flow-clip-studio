@@ -103,10 +103,12 @@ def init_db() -> None:
             duration REAL, width INTEGER, height INTEGER,
             created_at TEXT NOT NULL,
             storage_url TEXT,
-            thumbnail_storage_url TEXT
+            thumbnail_storage_url TEXT,
+            product_id TEXT
         );
         ALTER TABLE clips ADD COLUMN IF NOT EXISTS storage_url TEXT;
         ALTER TABLE clips ADD COLUMN IF NOT EXISTS thumbnail_storage_url TEXT;
+        ALTER TABLE clips ADD COLUMN IF NOT EXISTS product_id TEXT;
 
         CREATE TABLE IF NOT EXISTS activity_log (
             id SERIAL PRIMARY KEY,
@@ -120,8 +122,10 @@ def init_db() -> None:
             job_id TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             category TEXT, segment TEXT, variant TEXT, watermark TEXT,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            product_id TEXT
         );
+        ALTER TABLE pending_jobs ADD COLUMN IF NOT EXISTS product_id TEXT;
 
         -- Latest known Flow credit balance per user. Previously this was
         -- read live from cached job JSON files under userdata/<uid>/outputs/jobs/,
@@ -252,12 +256,12 @@ def add_clip(user_id: int, clip: dict) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO clips (user_id, file, thumbnail, category, segment, variant, "
-            "duration, width, height, created_at, storage_url, thumbnail_storage_url) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "duration, width, height, created_at, storage_url, thumbnail_storage_url, product_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (user_id, clip["file"], clip.get("thumbnail"), clip.get("category"),
              clip.get("segment"), clip.get("variant"), clip.get("duration"),
              clip.get("width"), clip.get("height"), time.strftime("%Y-%m-%d %H:%M:%S"),
-             clip.get("storage_url"), clip.get("thumbnail_storage_url")))
+             clip.get("storage_url"), clip.get("thumbnail_storage_url"), clip.get("product_id")))
         conn.commit()
 
 
@@ -369,15 +373,15 @@ def list_log(user_id: int, limit: int = 200) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def set_pending_job(job_id: str, user_id: int, category: str, segment: str,
-                     variant: str, watermark: dict) -> None:
+                     variant: str, watermark: dict, product_id: str = "") -> None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO pending_jobs (job_id, user_id, category, segment, variant, watermark, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+            "INSERT INTO pending_jobs (job_id, user_id, category, segment, variant, watermark, "
+            "created_at, product_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (job_id) DO UPDATE SET category=EXCLUDED.category, segment=EXCLUDED.segment, "
-            "variant=EXCLUDED.variant, watermark=EXCLUDED.watermark",
+            "variant=EXCLUDED.variant, watermark=EXCLUDED.watermark, product_id=EXCLUDED.product_id",
             (job_id, user_id, category, segment, variant, json.dumps(watermark or {}),
-             time.strftime("%Y-%m-%d %H:%M:%S")))
+             time.strftime("%Y-%m-%d %H:%M:%S"), product_id))
         conn.commit()
 
 

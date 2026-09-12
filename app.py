@@ -668,6 +668,63 @@ def api_downloads_zip():
                      headers={"Content-Disposition": "attachment; filename=clips.zip"})
 
 
+@app.route("/api/downloads/shopee_pack", methods=["POST"])
+@login_required
+def api_downloads_shopee_pack():
+    """Pair each selected clip with a same-name .json (title/product_link/caption/
+    video_filename) in one zip, ready for a Shopee bulk-video-upload tool. Needs the
+    clip's product_id (only present on clips generated after this feature shipped -
+    older ones fall back to category/no caption/no link)."""
+    uid = current_user_id()
+    outputs_dir = user_dir(uid) / "outputs"
+    clip_ids = (request.get_json(force=True) or {}).get("clip_ids") or []
+    if not clip_ids:
+        return jsonify({"error": "ไม่ได้เลือกไฟล์"}), 400
+
+    buf = io.BytesIO()
+    used_names: set[str] = set()
+    added = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for clip_id in clip_ids:
+            clip = db.get_clip(uid, clip_id)
+            if not clip:
+                continue
+            data = _read_clip_bytes(clip, outputs_dir)
+            if data is None:
+                continue
+            name = clip["file"]
+            if name in used_names:  # defensive - clip filenames are unique in practice
+                name = f"{clip_id}_{name}"
+            used_names.add(name)
+            zf.writestr(name, data)
+
+            brief = db.get_brief(uid, clip["product_id"]) if clip.get("product_id") else None
+            title = (brief.get("product_name") if brief else "") or clip.get("category") or ""
+            product_link = (brief.get("product_link") if brief else "") or ""
+            caption_text = ""
+            if brief:
+                shopee = caption_writer.GENERATORS["shopee"](brief)
+                if shopee["captions"]:
+                    cap = shopee["captions"][0]
+                    caption_text = cap["text"]
+                    if cap["hashtags"]:
+                        caption_text += "\n\n" + " ".join(cap["hashtags"])
+
+            stem = Path(name).stem
+            payload = {"title": title, "product_link": product_link,
+                       "caption": caption_text, "video_filename": name}
+            zf.writestr(f"{stem}.json", json.dumps(payload, ensure_ascii=False, indent=2))
+            added += 1
+
+    if not added:
+        return jsonify({"error": "ไม่พบไฟล์ที่เลือกเลย (อาจถูกลบ/หมดอายุไปแล้ว)"}), 404
+
+    db.log_event(uid, "downloads_shopee_pack", clip_count=added)
+    buf.seek(0)
+    return Response(buf.read(), mimetype="application/zip",
+                     headers={"Content-Disposition": "attachment; filename=shopee_pack.zip"})
+
+
 def _job_generation_seconds(logs: list[dict]) -> list[float]:
     """Pair job_submitted -> job_completed log entries by job_id to get real
     wall-clock generation time per clip (logs come back newest-first)."""
@@ -886,7 +943,8 @@ def submit_brief_segments(uid: int, brief: dict, segment_ids: set[str]) -> list[
             gfr.save_json(api_result, outputs_dir / "jobs" / f"{safe_name}.json")
             segment_label = {"a": "A - Hook", "b": "B - Feature", "c": "C - CTA"}.get(
                 row["id"].rsplit("_", 1)[-1], row["id"])
-            db.set_pending_job(jid, uid, category, segment_label, row_variant, watermark)
+            db.set_pending_job(jid, uid, category, segment_label, row_variant, watermark,
+                                brief.get("product_id", ""))
             db.log_event(uid, "job_submitted", job_id=jid, segment_id=row["id"], category=category)
             results.append({"segment_id": row["id"], "job_id": jid, "status": "submitted"})
         except Exception as exc:  # noqa: BLE001
@@ -1101,7 +1159,8 @@ def api_job_status(job_id: str):
                     db.add_clip(uid, {
                         "file": fname, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
                         "category": meta["category"], "segment": meta["segment"],
-                        "variant": meta["variant"], **info, **storage_urls,
+                        "variant": meta["variant"], "product_id": meta.get("product_id"),
+                        **info, **storage_urls,
                     })
                     db.delete_pending_job(job_id)
                     db.log_event(uid, "job_completed", job_id=job_id, category=meta["category"],
@@ -1169,7 +1228,7 @@ def api_concatenate():
     db.add_clip(uid, {
         "file": out_name, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
         "category": category, "segment": f"คลิปรวม {round(info['duration'])} วินาที",
-        "variant": "", **info, **storage_urls,
+        "variant": "", "product_id": product_id, **info, **storage_urls,
     })
     db.log_event(uid, "concatenate", category=category, files=filenames, output=out_name, duration=info["duration"])
 
