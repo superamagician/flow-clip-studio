@@ -17,6 +17,15 @@
   th, td { text-align: left; padding: 6px 10px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
   th { background: var(--bg-alt); color: var(--muted); }
   .empty { color: var(--muted); text-align: center; padding: 20px; }
+  select, input[type=text] {
+    background: #fff; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit;
+  }
+  button {
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+    padding: 9px 16px; font-size: 13px; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 {% endblock %}
 {% block content %}
@@ -26,6 +35,25 @@
     <a href="https://supabase.com/dashboard" target="_blank" style="text-decoration:underline">Supabase Dashboard</a> โดยตรง
   </div>
   <div class="stat-grid" id="statGrid"></div>
+  <div class="section">
+    <h3>รีเซ็ตรหัสผ่านผู้ใช้</h3>
+    <div style="color:var(--muted);font-size:12.5px;margin-bottom:12px">
+      ใช้เมื่อลูกค้า/ทีมงานลืมรหัสผ่านเข้าระบบ (เว็บนี้ยังไม่มีระบบ "ลืมรหัสผ่าน" แบบส่งอีเมลให้ตัวเอง) —
+      ตั้งรหัสผ่านใหม่ให้โดยตรงจากตรงนี้ แล้วแจ้งรหัสใหม่ให้เจ้าของบัญชีไปเปลี่ยนเองอีกทีถ้าต้องการ
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">ผู้ใช้</label>
+        <select id="resetUserSelect" style="min-width:220px"></select>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px">รหัสผ่านใหม่</label>
+        <input type="text" id="resetPasswordInput" placeholder="อย่างน้อย 6 ตัวอักษร" style="min-width:200px">
+      </div>
+      <button type="button" id="resetPasswordBtn">รีเซ็ตรหัสผ่าน</button>
+    </div>
+    <div id="resetPasswordStatus" style="margin-top:10px;font-size:13px"></div>
+  </div>
   <div class="section">
     <h3>งานที่ล้มเหลวล่าสุด (ทุกลูกค้า)</h3>
     <div id="failuresTable"></div>
@@ -68,5 +96,55 @@
     </table>`;
   }
   main();
+
+  async function loadUsers() {
+    const select = document.getElementById("resetUserSelect");
+    try {
+      const res = await fetch("/api/admin/users");
+      const data = await res.json();
+      select.innerHTML = data.users.map(u => `<option value="${u.id}">${u.username}</option>`).join("");
+    } catch (e) {
+      select.innerHTML = '<option value="">โหลดรายชื่อผู้ใช้ไม่สำเร็จ</option>';
+    }
+  }
+  loadUsers();
+
+  document.getElementById("resetPasswordBtn").addEventListener("click", async () => {
+    const select = document.getElementById("resetUserSelect");
+    const passwordInput = document.getElementById("resetPasswordInput");
+    const statusEl = document.getElementById("resetPasswordStatus");
+    const userId = select.value;
+    const username = select.options[select.selectedIndex] ? select.options[select.selectedIndex].text : "";
+    const newPassword = passwordInput.value.trim();
+    if (!userId || !newPassword) {
+      statusEl.textContent = "เลือกผู้ใช้และกรอกรหัสผ่านใหม่ให้ครบ";
+      statusEl.style.color = "var(--danger)";
+      return;
+    }
+    if (!(await showConfirm(`ยืนยันตั้งรหัสผ่านใหม่ให้ "${username}"? รหัสเดิมจะใช้ไม่ได้ทันที`))) return;
+
+    const btn = document.getElementById("resetPasswordBtn");
+    btn.disabled = true;
+    statusEl.textContent = "";
+    try {
+      const res = await fetch("/api/admin/reset_password", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: parseInt(userId, 10), new_password: newPassword }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        statusEl.textContent = "Error: " + data.error;
+        statusEl.style.color = "var(--danger)";
+      } else {
+        statusEl.textContent = `ตั้งรหัสผ่านใหม่ให้ "${data.username}" สำเร็จแล้ว`;
+        statusEl.style.color = "var(--ok)";
+        passwordInput.value = "";
+      }
+    } catch (e) {
+      statusEl.textContent = "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง";
+      statusEl.style.color = "var(--danger)";
+    }
+    btn.disabled = false;
+  });
 </script>
 {% endblock %}

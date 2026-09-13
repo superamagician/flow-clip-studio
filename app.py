@@ -572,6 +572,32 @@ def api_admin_overview():
     return jsonify(db.admin_overview())
 
 
+@app.route("/api/admin/users")
+@login_required
+@admin_required
+def api_admin_users():
+    return jsonify({"users": db.list_users()})
+
+
+@app.route("/api/admin/reset_password", methods=["POST"])
+@login_required
+@admin_required
+def api_admin_reset_password():
+    payload = request.get_json(force=True) or {}
+    target_user_id = payload.get("user_id")
+    new_password = (payload.get("new_password") or "").strip()
+    if not target_user_id or not new_password:
+        return jsonify({"error": "ข้อมูลไม่ครบ"}), 400
+    if len(new_password) < 6:
+        return jsonify({"error": "รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร"}), 400
+    target = db.get_user(target_user_id)
+    if not target:
+        return jsonify({"error": "ไม่พบผู้ใช้นี้"}), 404
+    db.set_user_password(target_user_id, new_password)
+    db.log_event(current_user_id(), "admin_password_reset", target_username=target["username"])
+    return jsonify({"ok": True, "username": target["username"]})
+
+
 @app.route("/reports")
 @login_required
 def reports_page():

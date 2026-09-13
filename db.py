@@ -226,6 +226,20 @@ def get_user(user_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+def list_users() -> list[dict]:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, username, created_at FROM users ORDER BY username")
+        return [dict(r) for r in cur.fetchall()]
+
+
+def set_user_password(user_id: int, new_password: str) -> None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE users SET password_hash = %s WHERE id = %s",
+            (generate_password_hash(new_password), user_id))
+        conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Credentials (encrypted at rest)
 # ---------------------------------------------------------------------------
