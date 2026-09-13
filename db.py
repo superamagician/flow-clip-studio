@@ -466,14 +466,25 @@ def delete_pending_job(job_id: str) -> None:
 def claim_job_processing(job_id: str) -> bool:
     """Atomically claim a completed job for post-processing. Returns True only
     for the caller that wins the race - safe across gunicorn worker processes,
-    unlike an in-memory set. Row is never removed, so a retried claim on the
-    same job_id (e.g. after a worker crash mid-processing) stays False; that's
-    an acceptable tradeoff since the whole point is at-most-once processing."""
+    unlike an in-memory set. A claim older than 5 minutes is treated as stale
+    (the worker that made it almost certainly died mid-processing - e.g. an
+    OOM kill or a Render restart - rather than genuinely still working after
+    that long) and can be re-claimed, so a stuck job self-heals on the next
+    poll instead of being locked out forever with no automatic recovery."""
+    # Plain string comparison against a cutoff computed in Python (same
+    # zero-padded "%Y-%m-%d %H:%M:%S" convention as every other TEXT timestamp
+    # column in this file) rather than a Postgres-side to_timestamp()/NOW()
+    # comparison, which would silently misinterpret these naive strings if the
+    # DB session timezone doesn't match the app server's - safer to keep both
+    # sides of the comparison computed the same way, in the same process.
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+    stale_cutoff = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 300))
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO job_processing_claims (job_id, claimed_at) VALUES (%s, %s) "
-            "ON CONFLICT (job_id) DO NOTHING",
-            (job_id, time.strftime("%Y-%m-%d %H:%M:%S")))
+            "ON CONFLICT (job_id) DO UPDATE SET claimed_at = EXCLUDED.claimed_at "
+            "WHERE job_processing_claims.claimed_at < %s",
+            (job_id, now_str, stale_cutoff))
         conn.commit()
         return cur.rowcount > 0
 
