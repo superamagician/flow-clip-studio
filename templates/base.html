@@ -84,6 +84,25 @@
   .content { padding: 28px; max-width: 960px; }
   .sidebar-backdrop { display: none; }
 
+  /* Shared confirm modal (replaces the browser's native confirm() so it never
+     blocks in a way a page-level tool/automation or a distracted user can miss) */
+  .confirm-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 100;
+    display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .confirm-overlay.open { display: flex; }
+  .confirm-box {
+    background: var(--panel); border-radius: var(--radius); padding: 20px;
+    max-width: 380px; width: 100%; box-shadow: 0 12px 32px rgba(0,0,0,.18);
+  }
+  .confirm-msg { font-size: 14px; line-height: 1.5; margin-bottom: 16px; white-space: pre-wrap; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .confirm-actions button {
+    border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; cursor: pointer;
+  }
+  .confirm-actions .confirm-cancel { background: var(--bg-alt); color: var(--text); }
+  .confirm-actions .confirm-ok { background: var(--danger); color: #fff; }
+
   /* Responsive: tablet */
   @media (max-width: 900px) {
     .content { padding: 20px; }
@@ -152,7 +171,39 @@
 
   <div class="services-popover" id="servicesPopover"></div>
 
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-box">
+      <div class="confirm-msg" id="confirmMsg"></div>
+      <div class="confirm-actions">
+        <button type="button" class="confirm-cancel" id="confirmCancelBtn">ยกเลิก</button>
+        <button type="button" class="confirm-ok" id="confirmOkBtn">ตกลง</button>
+      </div>
+    </div>
+  </div>
+
 <script>
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("confirmOverlay");
+    document.getElementById("confirmMsg").textContent = message;
+    const okBtn = document.getElementById("confirmOkBtn");
+    const cancelBtn = document.getElementById("confirmCancelBtn");
+    const cleanup = (result) => {
+      overlay.classList.remove("open");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      overlay.removeEventListener("click", onOverlayClick);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onOverlayClick = (e) => { if (e.target === overlay) cleanup(false); };
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    overlay.addEventListener("click", onOverlayClick);
+    overlay.classList.add("open");
+  });
+}
 function toggleSidebar() {
   document.getElementById("sidebar").classList.toggle("open");
   document.getElementById("sidebarBackdrop").classList.toggle("open");

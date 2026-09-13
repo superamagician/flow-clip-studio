@@ -408,7 +408,7 @@ document.getElementById("backBtn").addEventListener("click", () => {
 document.getElementById("generateBtn").addEventListener("click", async () => {
   const checked = [...document.querySelectorAll(".segCheck:checked")].map(c => c.value);
   if (!checked.length) { alert("เลือกอย่างน้อย 1 segment"); return; }
-  if (!confirm(`ยืนยันสร้างจริง ${checked.length} segment? จะหักเครดิตทันที`)) return;
+  if (!(await showConfirm(`ยืนยันสร้างจริง ${checked.length} segment? จะหักเครดิตทันที`))) return;
 
   const brief = collectBrief();
   const genBtn = document.getElementById("generateBtn");
@@ -634,7 +634,7 @@ document.getElementById("autoPilotBtn").addEventListener("click", async () => {
     alert(`สินค้านี้มีคลิปที่เสร็จแล้วแค่ ${letters.length} จาก 3 (${letters.join(", ") || "ไม่มีเลย"}) ต้องมีอย่างน้อย 2 ตัวถึงจะรวมได้`);
     return;
   }
-  if (!confirm(`พบคลิป ${letters.join(" + ")} ล่าสุดของสินค้านี้ ยืนยันรวมเป็นคลิปเดียว?`)) return;
+  if (!(await showConfirm(`พบคลิป ${letters.join(" + ")} ล่าสุดของสินค้านี้ ยืนยันรวมเป็นคลิปเดียว?`))) return;
 
   const jobsSection = document.getElementById("jobsSection");
   const jobCards = document.getElementById("jobCards");

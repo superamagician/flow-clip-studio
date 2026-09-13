@@ -121,7 +121,7 @@ document.getElementById("backBtn").addEventListener("click", () => {
 });
 
 document.getElementById("confirmBtn").addEventListener("click", async () => {
-  if (!confirm(`ยืนยันสร้างจริง ${lastProductCount} สินค้า (${lastProductCount * 3} คลิป)? จะหักเครดิตทันที`)) return;
+  if (!(await showConfirm(`ยืนยันสร้างจริง ${lastProductCount} สินค้า (${lastProductCount * 3} คลิป)? จะหักเครดิตทันที`))) return;
 
   const csvFile = document.getElementById("csvFile").files[0];
   const imageFiles = document.getElementById("imageFiles").files;

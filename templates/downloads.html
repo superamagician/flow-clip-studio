@@ -190,7 +190,7 @@
     "🛒 Shopee Pack (mp4 + json คู่กัน)", n => `shopee_pack_${n}.zip`));
 
   async function deleteClip(id) {
-    if (!confirm("ลบไฟล์นี้ถาวร? กู้คืนไม่ได้")) return;
+    if (!(await showConfirm("ลบไฟล์นี้ถาวร? กู้คืนไม่ได้"))) return;
     const res = await fetch(`/api/downloads/${id}`, { method: "DELETE" });
     const data = await res.json();
     if (data.error) { alert(data.error); return; }
