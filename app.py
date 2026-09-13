@@ -905,6 +905,15 @@ def api_upload_reference():
         return jsonify({"error": UNSUPPORTED_IMAGE_MSG}), 400
     dest = user_dir(current_user_id()) / "uploads" / f"{uuid.uuid4().hex}{ext}"
     file.save(dest)
+    # Local disk is ephemeral on Render - a deploy or dyno restart between this
+    # upload and the eventual /api/generate call wipes it, which is what was
+    # causing "Reference not found" failures on segments that looked otherwise
+    # fine. Back it up to Supabase Storage so it can be re-fetched at submit
+    # time (see _ensure_reference_local); best-effort, doesn't block the upload.
+    try:
+        storage.upload(dest, f"uploads/{current_user_id()}/{dest.name}")
+    except Exception as exc:  # noqa: BLE001
+        db.log_event(current_user_id(), "upload_backup_failed", error=str(exc))
     return jsonify({"path": str(dest)})
 
 
@@ -925,10 +934,33 @@ def api_flow_accounts():
 # API: generate / concatenate / status
 # ---------------------------------------------------------------------------
 
+def _ensure_reference_local(path_str: str, uid: int) -> str:
+    """Re-download a reference image from its Supabase Storage backup if it's
+    missing on local disk. Local disk is ephemeral on Render, so a deploy or
+    dyno restart between uploading a product photo (on the create page) and
+    actually confirming generation wipes it - this was the real cause behind
+    segments that "fail regularly" with no obvious pattern. If Storage isn't
+    configured or has no backup for this file, return the path unchanged and
+    let client.upload()'s existing "Reference not found" error surface as before."""
+    path = Path(path_str)
+    if path.is_file():
+        return path_str
+    url = storage.public_url(f"uploads/{uid}/{path.name}")
+    if url:
+        try:
+            gfr.download(url, path)
+        except Exception:  # noqa: BLE001
+            pass
+    return path_str
+
+
 def _submit_one_row(client, uid: int, row: dict, account_email: str, category: str,
                      row_variant: str, watermark: dict, product_id: str, outputs_dir: Path) -> dict:
     """Submit exactly one segment's row to Flow."""
-    references = [row["reference_images"]] if row.get("reference_images") else []
+    ref_path = row.get("reference_images")
+    if ref_path:
+        ref_path = _ensure_reference_local(ref_path, uid)
+    references = [ref_path] if ref_path else []
     try:
         gfr.validate(row["model"], row["aspect_ratio"], row["resolution"],
                      int(row["duration"]), int(row["count"]))
