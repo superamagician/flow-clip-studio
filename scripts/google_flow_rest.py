@@ -30,7 +30,7 @@ class Client:
         self.token = token
         self._upload_cache: dict[str, str] = {}
 
-    def request(self, method: str, path: str, body=None, content_type="application/json"):
+    def request(self, method: str, path: str, body=None, content_type="application/json", timeout=660):
         if not self.token:
             raise SystemExit("Missing USEAPI_TOKEN in the selected .env file")
         data = None if body is None else (
@@ -42,7 +42,7 @@ class Client:
             "User-Agent": "google-flow-rest-skill/1.0",
         })
         try:
-            with urllib.request.urlopen(req, timeout=660) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 raw = response.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
@@ -94,8 +94,12 @@ class Client:
         return self.request("POST", "/videos", payload)
 
     def job(self, job_id):
+        # Called every ~8s per in-progress segment from the browser's poll loop,
+        # so a slow/stuck response here must fail fast rather than tying up a
+        # gunicorn worker for minutes - with only 2 workers, a few stuck status
+        # calls were enough to make the whole site unresponsive for every user.
         return self.request(
-            "GET", "/jobs/" + urllib.parse.quote(job_id, safe=":@"))
+            "GET", "/jobs/" + urllib.parse.quote(job_id, safe=":@"), timeout=20)
 
 
 def validate(model, aspect, resolution, duration, count):

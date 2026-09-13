@@ -17,4 +17,11 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Runs the schema migration (idempotent CREATE TABLE IF NOT EXISTS) then starts gunicorn.
-CMD ["sh", "-c", "python -c 'import db; db.init_db()' && gunicorn -b 0.0.0.0:$PORT -w 2 --timeout 240 app:app"]
+# gthread + threads=4: this app's request handling is almost entirely I/O wait
+# (calling useapi.net, Supabase Storage, Postgres) rather than CPU work, so plain
+# sync workers (the old config) meant a single slow/stuck outbound call occupied
+# a whole worker process - with only 2 of them, a few concurrent status polls
+# hitting a slow moment on useapi.net was enough to make the entire site
+# unresponsive for every user. Threads let each worker process serve several
+# requests concurrently while most of them are just waiting on a network call.
+CMD ["sh", "-c", "python -c 'import db; db.init_db()' && gunicorn -b 0.0.0.0:$PORT -w 2 --worker-class gthread --threads 4 --timeout 240 app:app"]
