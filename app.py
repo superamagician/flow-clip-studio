@@ -934,6 +934,50 @@ def api_flow_accounts():
 # API: generate / concatenate / status
 # ---------------------------------------------------------------------------
 
+def _finish_completed_job(uid: int, job_id: str, fname: str, video_url: str | None,
+                           already_downloaded: bool, outputs_dir: Path) -> None:
+    """Runs in a background thread once useapi.net reports a job "completed".
+    Downloading the raw video, watermarking, thumbnailing, and uploading to
+    Supabase Storage together can take well past what a single HTTP request
+    should hold open - doing this synchronously inside api_job_status() used
+    to be why segments that had actually finished fine still showed "เช็ค
+    สถานะไม่ได้" whenever several segments completed around the same time and
+    competed for the same limited CPU (ffmpeg is real CPU work, not I/O wait)."""
+    try:
+        video_path = outputs_dir / fname
+        if not already_downloaded and video_url:
+            gfr.download(video_url, video_path)
+        meta = db.peek_pending_job(job_id) or {
+            "category": "ทดสอบ", "segment": fname, "variant": "", "watermark": {}}
+        try:
+            apply_watermark(video_path, meta.get("watermark"))
+        except subprocess.CalledProcessError as exc:
+            db.log_event(uid, "watermark_failed", job_id=job_id,
+                         error=exc.stderr[-300:] if exc.stderr else str(exc))
+        info = ffprobe_info(video_path)
+        thumb_name = video_path.stem + ".jpg"
+        thumb_path = outputs_dir / "thumbnails" / thumb_name
+        try:
+            make_thumbnail(video_path, thumb_path)
+        except subprocess.CalledProcessError:
+            thumb_name = None
+        storage_urls = upload_clip_to_storage(uid, video_path, thumb_path if thumb_name else None)
+        db.add_clip(uid, {
+            "file": fname, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
+            "category": meta["category"], "segment": meta["segment"],
+            "variant": meta["variant"], "product_id": meta.get("product_id"),
+            **info, **storage_urls,
+        })
+        db.delete_pending_job(job_id)
+        db.log_event(uid, "job_completed", job_id=job_id, category=meta["category"],
+                     segment=meta["segment"], file=fname, duration=info["duration"])
+    except Exception as exc:  # noqa: BLE001
+        db.log_event(uid, "status_processing_failed", job_id=job_id, error=str(exc))
+        # Release the claim so the next status poll retries instead of this
+        # job being locked out of processing forever by a one-time failure.
+        db.delete_job_claim(job_id)
+
+
 def _ensure_reference_local(path_str: str, uid: int) -> str:
     """Re-download a reference image from its Supabase Storage backup if it's
     missing on local disk. Local disk is ephemeral on Render, so a deploy or
@@ -1273,51 +1317,40 @@ def api_job_status(job_id: str):
             media = gfr.get_media(result)
             existing = list(outputs_dir.glob(f"{safe_name}_*.mp4"))
             if existing:
-                file_url = f"/outputs/{existing[0].name}"
+                fname = existing[0].name
+                video_url, already_downloaded = None, True
             elif media and media[0].get("videoUrl"):
-                out_path = outputs_dir / f"{safe_name}_01.mp4"
-                gfr.download(media[0]["videoUrl"], out_path)
-                file_url = f"/outputs/{out_path.name}"
+                fname = f"{safe_name}_01.mp4"
+                video_url, already_downloaded = media[0]["videoUrl"], False
+            else:
+                fname = None
 
-            if file_url:
-                fname = Path(file_url).name
-                if not db.clip_exists(uid, fname):
-                    video_path = outputs_dir / fname
-                    meta = db.peek_pending_job(job_id) or {
-                        "category": "ทดสอบ", "segment": fname, "variant": "", "watermark": {}}
-
-                    try:
-                        apply_watermark(video_path, meta.get("watermark"))
-                    except subprocess.CalledProcessError as exc:
-                        db.log_event(uid, "watermark_failed", job_id=job_id,
-                                     error=exc.stderr[-300:] if exc.stderr else str(exc))
-
-                    info = ffprobe_info(video_path)
-                    thumb_name = video_path.stem + ".jpg"
-                    thumb_path = outputs_dir / "thumbnails" / thumb_name
-                    try:
-                        make_thumbnail(video_path, thumb_path)
-                    except subprocess.CalledProcessError:
-                        thumb_name = None
-                    storage_urls = upload_clip_to_storage(
-                        uid, video_path, thumb_path if thumb_name else None)
-                    db.add_clip(uid, {
-                        "file": fname, "thumbnail": f"thumbnails/{thumb_name}" if thumb_name else None,
-                        "category": meta["category"], "segment": meta["segment"],
-                        "variant": meta["variant"], "product_id": meta.get("product_id"),
-                        **info, **storage_urls,
-                    })
-                    db.delete_pending_job(job_id)
-                    db.log_event(uid, "job_completed", job_id=job_id, category=meta["category"],
-                                 segment=meta["segment"], file=fname, duration=info["duration"])
-                    if storage_urls.get("storage_url"):
-                        file_url = storage_urls["storage_url"]
+            if fname:
+                clip = db.get_clip_by_file(uid, fname)
+                if clip:
+                    file_url = clip.get("storage_url") or f"/outputs/{fname}"
+                else:
+                    # Post-processing (download/watermark/thumbnail/Storage upload)
+                    # runs in the background rather than blocking this request -
+                    # see _finish_completed_job. claim_job_processing() is a DB-
+                    # backed atomic claim (not an in-memory set) since a status
+                    # poll for the same job_id can land on either gunicorn worker
+                    # process. Tell the frontend to keep polling either way; a
+                    # later poll will find the clip via get_clip_by_file above
+                    # once the background thread (in whichever process won the
+                    # claim) finishes.
+                    if db.claim_job_processing(job_id):
+                        threading.Thread(
+                            target=_finish_completed_job,
+                            args=(uid, job_id, fname, video_url, already_downloaded, outputs_dir),
+                            daemon=True).start()
+                    return jsonify({"status": "processing", "file_url": None})
         except Exception as exc:  # noqa: BLE001
-            # The Flow job itself finished - only OUR post-processing (download /
-            # ffmpeg / DB write) failed, often a transient network blip on Render.
-            # Report back as still-processing so the frontend keeps polling and
-            # retries automatically instead of this endpoint 500ing, which used
-            # to silently kill the browser's poll loop for that one segment
+            # The Flow job itself finished - only OUR handling of it (checking
+            # local/DB state) failed, often a transient blip on Render. Report
+            # back as still-processing so the frontend keeps polling and retries
+            # automatically instead of this endpoint 500ing, which used to
+            # silently kill the browser's poll loop for that one segment
             # (uncaught fetch/json errors there have no retry logic).
             db.log_event(uid, "status_processing_failed", job_id=job_id, error=str(exc))
             return jsonify({"status": "processing", "file_url": None})

@@ -152,6 +152,16 @@ def init_db() -> None:
         ALTER TABLE pending_jobs ADD COLUMN IF NOT EXISTS product_id TEXT;
         ALTER TABLE pending_jobs ADD COLUMN IF NOT EXISTS chain_json TEXT;
 
+        -- Cross-process claim so only one gunicorn worker runs the (slow)
+        -- download/watermark/thumbnail/Storage-upload pipeline for a job that
+        -- just completed, even though status polls for the same job_id can
+        -- land on either of the 2 worker processes. An in-memory set isn't
+        -- enough here since each worker process has its own.
+        CREATE TABLE IF NOT EXISTS job_processing_claims (
+            job_id TEXT PRIMARY KEY,
+            claimed_at TEXT NOT NULL
+        );
+
         -- Latest known Flow credit balance per user. Previously this was
         -- read live from cached job JSON files under userdata/<uid>/outputs/jobs/,
         -- which lives on Render's ephemeral disk and disappears on every
@@ -294,6 +304,13 @@ def clip_exists(user_id: int, file: str) -> bool:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM clips WHERE user_id = %s AND file = %s", (user_id, file))
         return cur.fetchone() is not None
+
+
+def get_clip_by_file(user_id: int, file: str) -> dict | None:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM clips WHERE user_id = %s AND file = %s", (user_id, file))
+        row = cur.fetchone()
+        return dict(row) if row else None
 
 
 def get_clip(user_id: int, clip_id: int) -> dict | None:
@@ -443,6 +460,29 @@ def peek_pending_job(job_id: str) -> dict | None:
 def delete_pending_job(job_id: str) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM pending_jobs WHERE job_id = %s", (job_id,))
+        conn.commit()
+
+
+def claim_job_processing(job_id: str) -> bool:
+    """Atomically claim a completed job for post-processing. Returns True only
+    for the caller that wins the race - safe across gunicorn worker processes,
+    unlike an in-memory set. Row is never removed, so a retried claim on the
+    same job_id (e.g. after a worker crash mid-processing) stays False; that's
+    an acceptable tradeoff since the whole point is at-most-once processing."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO job_processing_claims (job_id, claimed_at) VALUES (%s, %s) "
+            "ON CONFLICT (job_id) DO NOTHING",
+            (job_id, time.strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_job_claim(job_id: str) -> None:
+    """Release a claim so a failed post-processing attempt can be retried on
+    the next status poll instead of being locked out forever."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM job_processing_claims WHERE job_id = %s", (job_id,))
         conn.commit()
 
 
